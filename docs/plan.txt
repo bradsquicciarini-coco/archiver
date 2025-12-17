@@ -1,0 +1,49 @@
+Date range in question is 
+
+Date Range
+-----------
+Start : 01/01/25
+End   : 12/15/25
+
+
+Workflow
+------------
+1. Index data. Output should be a mapping of trips > log files
+- index data in coco-gg-bags
+- index trip data
+- generate trip metadata
+- aggregate into unified trip + metadata
+- remove trips with incidents
+- identify target files + generate csv manifest
+
+1a. (should not run until step 2 is complete)
+- initate glacier recovery via manifest and AWS batch job
+
+2. Partition
+- Create some representation to put messages inside SQS (most likely trip level)
+- Build worker that will consume messages
+
+3. Worker
+- download from glacier (s3)
+- conver rosbags to mcaps
+- inject data (route + map issues)
+- remove origin / dest information
+- chunk out (1 min)
+- merge into unified mcap
+- collect into 100GB tar files and upload to outbox
+
+
+Questions
+1. Do we also want to filter out large IMU events? Maybe eggregious ones?
+
+
+Costs
+--------
+Total Size: 829 TB
+Total hours: 100k hours
+Hours/month: ~20k hours / month
+Storage/month: ~160 TB/month
+
+Egress: ~$42k = $0.05/GB * 829 TB * 1000 GB/TB
+Storage (glacier): $820/month = $0.00099/GB * 829 TB * 1000 GB/TB
+Storage (standard): $17,409/month = $0.021/GB * 829 TB * 1000 GB/TB (lol)

@@ -1,0 +1,13 @@
+[project]
+name = "data-archiver"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "boto3>=1.42.10",
+    "pandas>=2.3.3",
+    "pyarrow>=22.0.0",
+    "redshift-connector[full]>=2.1.10",
+    "tqdm>=4.67.1",
+]
