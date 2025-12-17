@@ -22,6 +22,8 @@ Workflow
 2. Partition
 - Create some representation to put messages inside SQS (most likely trip level)
 - create ec2 scaling group that will stand up workers to consume from the queue
+- servers need 100GB storage (if streaming tar file to s3, otherwise they need double)
+
 
 3. Worker
 - download from glacier (s3)
@@ -47,3 +49,15 @@ Storage/month: ~160 TB/month
 Egress: ~$42k = $0.05/GB * 829 TB * 1000 GB/TB
 Storage (glacier): $820/month = $0.00099/GB * 829 TB * 1000 GB/TB
 Storage (standard): $17,409/month = $0.021/GB * 829 TB * 1000 GB/TB (lol)
+
+
+Tarfiles:
+100 GB / file 
+  -> $5/file for egress
+  -> ~ 8,000 files
+
+50 GB / file
+  -> $2.5/file for egress
+  -> ~ 16,000 files
+
+
