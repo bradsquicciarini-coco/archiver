@@ -1,6 +1,6 @@
-Date range in question is 
 
-Date Range
+
+Data Date Range to Process
 -----------
 Start : 01/01/25
 End   : 12/15/25
@@ -22,8 +22,7 @@ Workflow
 2. Partition
 - Create some representation to put messages inside SQS (most likely trip level)
 - create ec2 scaling group that will stand up workers to consume from the queue
-- servers need 100GB storage (if streaming tar file to s3, otherwise they need double)
-
+- each worker just processes one trip, so ephemeral storage can be a few GB
 
 3. Worker
 - download from glacier (s3)
@@ -32,15 +31,17 @@ Workflow
 - remove origin / dest information (route and trace)
 - chunk out (1 min)
 - merge into unified mcap
-- save trip to s3
+- save trip to s3 (with proper metadata)
 
 4. collect into tar files
 - collect into 100GB tar files and upload to outbox
-
+- servers need 100GB storage (if streaming tar file to s3, otherwise they need double)
+- tag file as uploaded
 
 Questions
 1. Do we also want to filter out large IMU events? Maybe eggregious ones?
 2. Where should we persist trip metadata? and upload status? maybe s3 tables?
+   - each file would incur an additinonal request for metadata update but at $1 for entire update, thats okay
 
 Costs
 --------
