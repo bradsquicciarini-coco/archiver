@@ -32,12 +32,15 @@ Workflow
 - remove origin / dest information (route and trace)
 - chunk out (1 min)
 - merge into unified mcap
+- save trip to s3
+
+4. collect into tar files
 - collect into 100GB tar files and upload to outbox
 
 
 Questions
 1. Do we also want to filter out large IMU events? Maybe eggregious ones?
-
+2. Where should we persist trip metadata? and upload status? maybe s3 tables?
 
 Costs
 --------
@@ -59,5 +62,12 @@ Tarfiles:
 50 GB / file
   -> $2.5/file for egress
   -> ~ 16,000 files
+
+Intermediate Files:
+
+100k hours @ avg 18 min / trip -> 300k trips
+$0.005/1000 PUT Requests 
+$0.0004/1000 GET Requests
+$0.0054/1000 trips if we cache -> $1.62 to cache trips
 
 
