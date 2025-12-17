@@ -21,13 +21,13 @@ Workflow
 
 2. Partition
 - Create some representation to put messages inside SQS (most likely trip level)
-- Build worker that will consume messages
+- create ec2 scaling group that will stand up workers to consume from the queue
 
 3. Worker
 - download from glacier (s3)
-- conver rosbags to mcaps
+- convert rosbags to mcaps
 - inject data (route + map issues)
-- remove origin / dest information
+- remove origin / dest information (route and trace)
 - chunk out (1 min)
 - merge into unified mcap
 - collect into 100GB tar files and upload to outbox
