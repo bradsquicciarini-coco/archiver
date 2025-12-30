@@ -17,13 +17,18 @@ OR
 
 TRIP-WORKER
 ---------------
-- pull a message off the queue
-- download all logs for a given trip
-- convert any bags to mcaps
-- inject additional data (route + map issues) as protobufs
-  - need to clip route
-- merge into unified mcap for the trip
-- store in in s3
+- [x] pull a message off the queue
+- [x] download all logs for a given trip
+- [x] convert any bags to mcaps
+- [ ] inject additional data...
+      - [ ] inject map issues
+      - [ ] need to clip route
+- [x] merge into unified mcap for the trip
+- [x] infer additional metadata
+- [ ] store in in s3
+
+TODO
+- [ ] if clipping to valid ranges, we need to handle latched topics properly
 
 
 
@@ -101,7 +106,7 @@ METADATA
 | vehicle.gps_version    | check for presence of /point_one/pose                     |
 | clip_start_utc         | simple                                                    |
 | clip_end_utc           | simple                                                    |
-| clip_avg_speed         | avg /car_speed                                            |
+| clip_avg_speed         | avg /car_speed     (already ahve)                                       |
 
 
 TOPICS

@@ -1,7 +1,7 @@
 copy (  
 with
     source as (select * from read_parquet('./data/matched_trips_and_logs.parquet')),
-    metadata as (select * from read_parquet('./data/metadata_20250101_20251130.parquet')),
+    metadata as (select * from read_parquet('./data/20250101_20251130/metadata.parquet')),
     trip_stats as (
         select
             pilot_assignment_id,

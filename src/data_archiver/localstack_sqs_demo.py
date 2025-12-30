@@ -1,6 +1,8 @@
 """Create a localstack SQS queue and send a test message."""
 
+import json
 import os
+import sys
 
 import boto3
 
@@ -16,12 +18,13 @@ def main() -> None:
     create_resp = sqs.create_queue(QueueName=queue_name)
     queue_url = create_resp["QueueUrl"]
 
+    with open(sys.argv[1], "r") as f:
+        example_payload = json.load(f)
+
     sqs.send_message(
         QueueUrl=queue_url,
-        MessageBody='{"hello": "world"}',
-        MessageAttributes={
-            "source": {"DataType": "String", "StringValue": "localstack"}
-        },
+        MessageBody=json.dumps(example_payload),
+        MessageAttributes={"source": {"DataType": "String", "StringValue": "localstack"}},
     )
 
     print(queue_url)

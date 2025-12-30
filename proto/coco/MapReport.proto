@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package coco;
+
+import "google/protobuf/timestamp.proto";
+
+message GeoPoint {
+  float lat = 1;
+  float lng = 2;
+}
+
+message MapReport {
+  IssueType type = 1;
+  string notes = 2;
+  GeoPoint reported_location = 3;
+  string id = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+enum IssueType {
+  ISSUE_OTHER = 0;
+  ISSUE_ROUTE_OBSTRUCTION = 1;
+  ISSUE_INFRASTRUCTURE = 2;
+  ISSUE_TRASH = 3;
+  ISSUE_UNSAFE_CROSSING = 4;
+  ISSUE_LONG_LIGHT = 5;
+  ISSUE_CONSTRUCTION = 6;
+  ISSUE_HAZARD = 7;
+  ISSUE_HOMELESS = 8;
+  ISSUE_NO_CURB_CUT = 9;
+  ISSUE_MOVABLE_OBJECT = 10;
+}
