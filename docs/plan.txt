@@ -75,7 +75,7 @@ $0.0054/1000 trips if we cache -> $1.62 to cache trips
 Intermediate storing
 ---------------
 cost request (PUT + GET)             : $0.0054/1000 requests (GET - $0.0004 PUT - $0.005)
-N assignments                        : 446,758
+N assignments                        : 445,340
 Cost per round trip (assignments)    : $2.41
 N minutes                            : 7,097,733
 Cost per round trip (minutes)        : $38.32
