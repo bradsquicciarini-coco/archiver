@@ -4,9 +4,15 @@ TODO
 - [x] get all metadata for each assignment (download from redshift)
 - [x] get route for each trip
 - [x] get map issues for each
-- [ ] clip the start and end (might put us under :/) (going to use chunks for this) [CHECK WE HAVE ENOUGH DATA]
+
+
+- [x] [HMMMMMMM] clip the start and end (might put us under :/) (going to use chunks for this) [CHECK WE HAVE ENOUGH DATA]
+OR
+- [ ] package up into trips
+
 - [ ] package into a message consumable by SQS (think we can just dump as json)
-... worker
+- [ ]... worker
+- [ ] find some more data
 
 
 
@@ -73,12 +79,13 @@ METADATA
 | weather.cloud_cover      |                                                | m.cloud_cover         |
 | vehicle.vehicle_id       |                                                | m.device_id           |
 | vehicle.vehicle_age_days | take from created at date                      | m.device_age_days     |
-| vehicle.vehicle_model    | 1 / 1.5                                        |                       |
+| vehicle.vehicle_model    | 1 / 1.5                                        | <FILE>.               |
 | vehicle.camera_version   | 1 / 1.5-1 / 1.5-3                              | <FILE>                |
 | vehicle.gps_version      | 1 /2                                           | <FILE>                |
 
 | name                   | how to calc                                               |
 | ---------------------- | --------------------------------------------------------- |
+| vehicle.vehicle_model  | if any are the new cameras                                |
 | vehicle.camera_version | check left /right /front image shapes (can do w/o decode) |
 | vehicle.gps_version    | check for presence of /point_one/pose                     |
 | clip_start_utc         | simple                                                    |
