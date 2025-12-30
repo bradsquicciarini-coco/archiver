@@ -15,6 +15,17 @@ OR
 - [ ] find some more data
 
 
+TRIP-WORKER
+---------------
+- pull a message off the queue
+- download all logs for a given trip
+- convert any bags to mcaps
+- inject additional data (route + map issues) as protobufs
+  - need to clip route
+- merge into unified mcap for the trip
+- store in in s3
+
+
 
 QUEUE
 ------------
