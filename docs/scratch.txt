@@ -1,0 +1,109 @@
+TODO
+-----------
+... data
+- [x] get all metadata for each assignment (download from redshift)
+- [x] get route for each trip
+- [x] get map issues for each
+- [ ] clip the start and end (might put us under :/) (going to use chunks for this) [CHECK WE HAVE ENOUGH DATA]
+- [ ] package into a message consumable by SQS (think we can just dump as json)
+... worker
+
+
+
+QUEUE
+------------
+  build one message per assignment
+
+if we can keep the payload under 1 Mib, we just put everything required in the SQS message
+
+message format:
+```
+  pilot_assignment_id  : pilot assignment id 
+  device_id            : device id for this
+  valid_start          : starting timestamp where both bags and video exists
+  valid_end            : similar but the end
+  valid_length_seconds : length of overlapping logs
+  files                : list of files 
+  n_files              : number of files
+```
+
+Q: should we include all the metadata in here? -> yes lets front load as much as possible
+
+WORKER (can we do this in go? will make scheduling workers easier)
+----------
+- pull a message off the queue
+- download all logs for a given trip
+- convert any bags to mcaps
+- inject additional data (route + map issues) as protobufs
+  - need to clip route
+- merge into unified mcap for the trip
+- [maybe] store metadata on the mcap file (and then the tar builder can create their json)
+- upload to s3 (double check intermediate results cost)
+  - if we reuse trip clips we'll be able to use the s3 tables for organizing the upload
+  - AND for downloading clips we care about (outside of open ai thing)
+
+TAR BUILDER
+-----------
+- Build up 100GB chunks and send tar over
+
+
+Q: Do we want to split into segments? honestly i think this will just make our lives harder
+
+
+
+
+METADATA
+----------
+
+| name                     | desc                                           | from                  |
+| ------------------------ | ---------------------------------------------- | --------------------- |
+| reference_id             | use pilot_assignment_id                        | m.pilot_assignment_id |
+| trip_id                  | use trip id                                    | m.trip_id             |
+| clip_start_utc           | use start from assignment                      | <FILE>                |
+| clip_end_utc             | use end from assignment                        | <FILE>                |
+| clip_avg_speed           | either compute from data or take from redshift | <FILE>                |
+| location.zone            |                                                | m.city                |
+| location.city            |                                                | m.city                |
+| location.country         |                                                | <HARDCODE>            |
+| location.local_timezone  |                                                | m.timezone            |
+| weather.weather_code     |                                                |                       |
+| weather.precipitation    |                                                | m.precipitation       |
+| weather.temperature_C    |                                                | m.temperature         |
+| weather.time_of_day      |                                                | m.tod                 |
+| weather.cloud_cover      |                                                | m.cloud_cover         |
+| vehicle.vehicle_id       |                                                | m.device_id           |
+| vehicle.vehicle_age_days | take from created at date                      | m.device_age_days     |
+| vehicle.vehicle_model    | 1 / 1.5                                        |                       |
+| vehicle.camera_version   | 1 / 1.5-1 / 1.5-3                              | <FILE>                |
+| vehicle.gps_version      | 1 /2                                           | <FILE>                |
+
+| name                   | how to calc                                               |
+| ---------------------- | --------------------------------------------------------- |
+| vehicle.camera_version | check left /right /front image shapes (can do w/o decode) |
+| vehicle.gps_version    | check for presence of /point_one/pose                     |
+| clip_start_utc         | simple                                                    |
+| clip_end_utc           | simple                                                    |
+| clip_avg_speed         | avg /car_speed                                            |
+
+
+TOPICS
+----------
+| Topic Name                      | Format                                        | Description                                                                                             |
+| ------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| robot.h264_video.back           | foxglove.CompressedVideo [protobuf]           | Back camera, landscape, 720p, 20hz                                                                      |
+| robot.h264_video.front          | foxglove.CompressedVideo [protobuf]           | Front camera, portrait, 720p, 20hz                                                                      |
+| robot.h264_video.left           | foxglove.CompressedVideo [protobuf]           | Left camera, landscape, 720p, 20hz                                                                      |
+| robot.h264_video.right          | foxglove.CompressedVideo [protobuf]           | Right camera, landscape, 720p, 20hz                                                                     |
+| /acu_driver/gps_nav_topic       | sensor_msgs/NavSatFix [ros1msg]               | Either raw gps or lat/lng from /point_one/pose                                                          |
+| /imu                            | sensor_msgs/Imu [ros1msg]                     | 6DOF IMU on the robot                                                                                   |
+| /point_one/pose                 | gps_driver/Pose [ros1msg]                     | RTK GPS + IMU Fused pose estimate                                                                       |
+| /speed_fb                       | segway_msgs/speed_fb [ros1msg]                | Scalar values for velocity                                                                              |
+| /odom                           | nav_msgs/Odometry [ros1msg]                   | Wheel + IMU fused odom                                                                                  |
+| /joy/selected                   | sensor_msgs/Joy [ros1msg]                     | Raw joystick msg from pilot                                                                             |
+| /cmd_vel/joystick/raw           | geometry_msgs/TwistStamped [ros1msg]          | Raw command from pilot                                                                                  |
+| /cmd_vel                        | geometry_msgs/TwistStamped [ros1msg]          | Command sent to base after filtering                                                                    |
+| /object_detection/detections_2d | object_detection_msgs/CameraDetections2DArray | [ros1msg] 2D boxes from front, left, and right camera.                                                  |
+| /object_detection/detections_3d | object_detection_msgs/CameraDetections3DArray | [ros1msg] 3D boxes from front, left, and right camera via IPM                                           |
+| /route/geojson                  | foxglove.GeoJSON [protobuf]                   | Routes associated with this segment. Note they are timestamp and a newer route means the route changed. |
+| /route/issue_report             | coco.MapReport [protobuf]                     | Any reports from the pilots of any map issues / obstructions they encounter                             |
+

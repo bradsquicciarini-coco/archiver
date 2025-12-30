@@ -11,3 +11,8 @@ dependencies = [
     "redshift-connector[full]>=2.1.10",
     "tqdm>=4.67.1",
 ]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.1.0",
+]

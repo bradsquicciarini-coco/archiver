@@ -2,6 +2,8 @@ copy (
   with tmp as (
     select
       nullif(regexp_extract(key, '\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}'), '') as ts_str0,
+
+
       nullif(replace(regexp_extract(key, '\d{4}-\d{2}-\d{2}_\d{2}_\d{2}_\d{2}'), '_', '-'), '') as ts_str1,
       coalesce(ts_str1, ts_str0) as ts_str,
       try_strptime(ts_str, '%Y-%m-%d-%H-%M-%S') as start_ts,

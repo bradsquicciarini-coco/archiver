@@ -3,7 +3,7 @@
 Data Date Range to Process
 -----------
 Start : 01/01/25
-End   : 12/15/25
+End   : 11/30/25
 
 
 Workflow
@@ -72,3 +72,27 @@ $0.0004/1000 GET Requests
 $0.0054/1000 trips if we cache -> $1.62 to cache trips
 
 
+Intermediate storing
+---------------
+cost request (PUT + GET)             : $0.0054/1000 requests (GET - $0.0004 PUT - $0.005)
+N assignments                        : 446,758
+Cost per round trip (assignments)    : $2.41
+N minutes                            : 7,097,733
+Cost per round trip (minutes)        : $38.32
+
+
+Backlog
+-------
+- [x] Index data (mapping of trip -> log files)
+- [x] Restore files for target trips (~118k hours)
+- [ ] Partition
+  - [ ] Build up represention to put inside sqs (trip level)
+  - [ ] Build worker that will pull down sqs and package up all the logs into a trip level representation
+  - [ ] The trip mcap shouldn't require any further data enrichment
+- [ ] Tarring
+  - [ ] This will chunk out into 1 minute clips
+  - [ ] This also needs to build up openai metadata
+
+Sequential Backlog
+---------
+- [ ] build up script to package up a single trip
