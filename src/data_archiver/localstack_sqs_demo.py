@@ -28,3 +28,7 @@ def main() -> None:
     )
 
     print(queue_url)
+
+
+if __name__ == "__main__":
+    main()

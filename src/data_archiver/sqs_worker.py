@@ -15,9 +15,14 @@ import time
 from typing import Any, Dict
 
 import boto3
+from shapely import wkb
 from mcap_ros1.decoder import DecoderFactory as Ros1DecoderFactory
 from mcap_protobuf.decoder import DecoderFactory as ProtobufDecoderFactory
 from mcap.reader import make_reader
+
+from data_archiver.enrich.map_issue import write_out_map_issues
+from data_archiver.enrich.route import write_out_routes
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +45,10 @@ TOPICS = [
     "/cmd_vel",
     "/object_detection/detections_2d",
     "/object_detection/detections_3d",
+    "/route/issue_report",
+    "/route/geojson",
+    # debug
+    "/debug/pts",
 ]
 
 
@@ -94,12 +103,15 @@ def infer_additional_vehicle_metadata(filepath: str):
         for _, chan, _, dmsg in reader.iter_decoded_messages(topics=["robot.h264_video.front", "robot.h264_video.right", "robot.h264_video.left"]):
             if not dmsg.keyframe:
                 continue
-            if chan.topic == "robot.h264_video.front" and has_new_front_cam is not None:
+            if chan.topic == "robot.h264_video.front" and has_new_front_cam is None:
                 has_new_front_cam = is_new_cam(dmsg.metadata)
-            elif chan.topic == "robot.h264_video.right" and has_new_right_cam is not None:
+                print(f"{has_new_front_cam=} {dmsg.metadata}")
+            elif chan.topic == "robot.h264_video.right" and has_new_right_cam is None:
                 has_new_right_cam = is_new_cam(dmsg.metadata)
-            elif chan.topic == "robot.h264_video.left" and has_new_left_cam is not None:
+                print(f"{has_new_right_cam=} {dmsg.metadata}")
+            elif chan.topic == "robot.h264_video.left" and has_new_left_cam is None:
                 has_new_left_cam = is_new_cam(dmsg.metadata)
+                print(f"{has_new_left_cam=} {dmsg.metadata}")
 
             checked_all = all([v is not None for v in [has_new_front_cam, has_new_right_cam, has_new_left_cam]])
             if checked_all:
@@ -185,9 +197,23 @@ def process_message(body: str, attributes: Dict[str, Any], tmp_dir: Path, keep_b
     #   2) create a new mcap with geojson routes that have been clipped
 
     # 3. inject any additional data (e.g. routes and map issues)
-    # ... TODO(Brad): map issues
+    valid_start_s = int(payload["valid_start"])
+    valid_end_s = int(payload["valid_end"])
+    # ... map issues
+    map_issue_output = tmp_dir / "map_issues.mcap"
+    write_out_map_issues(map_issue_output, payload["map_issues"])
+    local_files.append(map_issue_output)
+
     # ... TODO(Brad): inject camera calibration (and tfs?)
-    # ... TODO(Brad): routes (need to clip) according to origin / destination
+    #                 we may need to move camera inspection higher up
+
+    # ... routes
+    # TODO(Brad): need to clip according to origin / destination
+    origin_pt = wkb.loads(bytes.fromhex(payload["origin_point_hexwkb"]))
+    destination_pt = wkb.loads(bytes.fromhex(payload["destination_point_hexwkb"]))
+    route_output = tmp_dir / "routes.mcap"
+    write_out_routes(route_output, payload["routes"], valid_start_s, origin_pt, destination_pt)
+    local_files.append(route_output)
 
     # 4. Combine data into single mcap for the assignment
     # ... merge
@@ -197,8 +223,6 @@ def process_message(body: str, attributes: Dict[str, Any], tmp_dir: Path, keep_b
 
     # ... filter for specific topics and times
     filtered_output_fp = str(tmp_dir / "final.mcap")
-    valid_start_s = int(payload["valid_start"])
-    valid_end_s = int(payload["valid_end"])
     include_str = "".join([f' -y "{t}"   ' for t in TOPICS])
     cmd = f"mcap filter {merged_output_fp} {include_str} -s {valid_start_s} -e {valid_end_s} -o {filtered_output_fp}"
     logged_cmd(cmd)
@@ -231,7 +255,6 @@ def poll_loop(queue_url: str, *, max_messages: int, wait_time: int, visibility_t
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
-
     while not should_stop:
         resp = sqs.receive_message(
             QueueUrl=queue_url,
@@ -300,3 +323,7 @@ def main() -> int:
         keep_bags=args.keep_bags,
     )
     return 0
+
+
+if __name__ == "__main__":
+    main()

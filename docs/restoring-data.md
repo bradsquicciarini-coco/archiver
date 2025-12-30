@@ -27,15 +27,17 @@ from './data/logs.parquet';
 ## Trip Matching
 
 ```bash
-duckdb :memory: < sql/duckdb/match_trips_and_logs.sql
+uv run  scripts/query-redshift.py sql/redshift/trips.sql --profile prod -o data/20250101_20251130/pilot_trips.parquet
+duckdb :memory: < sql/duckdb/002__match_trips_and_logs.sql
+duckdb :memory: < sql/duckdb/004__aggregate_per_assignment.sql
 
 # check video data
 duckdb :memory: "
 select
   sum(trip_length_seconds)
-from './data/pilot_trips_20250101_20251130.parquet'
+from './data/20250101_20251130/pilot_trips.parquet'
 where trip_id in (
-  select distinct trip_id from './data/matched_trips_and_logs.parquet'
+  select distinct trip_id from './data/20250101_20251130/matched_trips_and_logs.parquet'
 );
 "
 ```

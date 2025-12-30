@@ -48,6 +48,8 @@ map_issues as (
 select
     a.pilot_assignment_id,
     a.device_id,
+    st_ashexwkb(ST_Point(p.origin_lng, p.origin_lat)) as origin_point_hexwkb,
+    st_ashexwkb(ST_Point(p.destination_lng, p.destination_lat)) as destination_point_hexwkb,
     epoch(a.valid_start) as valid_start,
     epoch(a.valid_end) as valid_end,
     a.valid_length_seconds,
@@ -57,6 +59,7 @@ select
     r.routes,
     i.map_issues
 from './data/20250101_20251130/assignments_and_logs.parquet' a
+left join './data/20250101_20251130/pilot_trips.parquet' p using (pilot_assignment_id)
 left join routes r using (pilot_assignment_id)
 left join
     map_issues i using (pilot_assignment_id)
