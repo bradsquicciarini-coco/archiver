@@ -20,17 +20,19 @@ TRIP-WORKER
 - [x] pull a message off the queue
 - [x] download all logs for a given trip
 - [x] convert any bags to mcaps
-- [ ] inject additional data...
-      - [ ] inject map issues
-      - [ ] need to clip route
+- [x] inject additional data...
+      - [x] inject map issues
+      - [x] need to clip route
 - [x] merge into unified mcap for the trip
 - [x] infer additional metadata
-- [ ] store in in s3
 - [ ] deployment
       - [ ] dockerfile
       - [ ] fill sqs queue
       - [ ] infra to run it (spot instances) 
             - could add another node pool that uses spot workers
+- [ ] upload to s3
+      - [ ] name based on assignment_id
+      - [ ] add metadata and try and reuse the old trip-clips table
 - [ ] make dockerfile and infra code
 - [ ] handle retryable errors and non-retryable errors
 - [ ] video data is not always continguous. need to handle that
@@ -39,7 +41,8 @@ TRIP-WORKER
 
 TODO
 - [ ] if clipping to valid ranges, we need to handle latched topics properly
-- [ ] how do we want to handle clips that are completely stationary?
+- [ ] how do we want to handle clips that are completely stationary (perhaps add metadata)
+- [ ] need to clean up files when we are done
 
 
 QUEUE
