@@ -74,7 +74,7 @@ def build_s3_client() -> Any:
 
 
 def logged_cmd(cmd: str):
-    logger.info(cmd)
+    logger.debug(cmd)
     subprocess.run(cmd, shell=True, check=True)
 
 
@@ -195,13 +195,13 @@ class LogDownloadError(RuntimeError):
 def download_logs(s3_client, log_files: list[str], output_dir: Path, bucket="coco-gg-bags-prod") -> list[str]:
     """Download the give log files"""
     local_files = []
-    logger.info(f"Will download {len(log_files)}")
+    logger.info(f"Will download {len(log_files)} files")
     for key in log_files:
         output_fp = output_dir / key.rsplit("/", 1)[-1]
         local_files.append(str(output_fp))
 
         if output_fp.exists():
-            logger.info("skipping download; already exists %s", output_fp)
+            logger.debug("skipping download; already exists %s", output_fp)
             continue
 
         s3_uri = f"s3://{bucket}/{key}"
@@ -221,11 +221,11 @@ def convert_bags_to_mcaps(files: list[str], keep_bags=False):
         base_filepath, ext = os.path.splitext(input_fp)
         if ext != ".bag":
             continue
-        logger.info(f"Will convert {input_fp} to an mcap")
+        logger.info(f"Convert {input_fp} to an mcap")
 
         output_fp = f"{base_filepath}.mcap"
         if os.path.exists(output_fp):
-            logger.info(f"mcap for bag: {input_fp} already exists. skipping ...")
+            logger.debug(f"mcap for bag: {input_fp} already exists. skipping ...")
             bag_to_mcap[input_fp] = output_fp
             continue
 
@@ -234,7 +234,7 @@ def convert_bags_to_mcaps(files: list[str], keep_bags=False):
 
         # cleanup
         if not keep_bags:
-            logger.info(f"removing {input_fp}")
+            logger.debug(f"removing {input_fp}")
             os.remove(input_fp)
         bag_to_mcap[input_fp] = output_fp
     return bag_to_mcap
@@ -272,15 +272,15 @@ class FileIndex:
 def cleanup(tmp_dir):
     for file in os.listdir(tmp_dir):
         fp = os.path.join(tmp_dir, file)
-        logger.info(f"Removing {fp}")
+        logger.debug(f"Removing {fp}")
         os.remove(fp)
-    logger.info(f"Removing {tmp_dir}")
+    logger.debug(f"Removing {tmp_dir}")
     os.rmdir(tmp_dir)
 
 
 def remove_files(files):
     for file in files:
-        logger.info(f"Removing {file}")
+        logger.debug(f"Removing {file}")
         os.remove(file)
 
 
@@ -299,153 +299,177 @@ def compute_avg_speed(filepath: str, frequency_hz=1):
         return np.array(speeds).mean()
 
 
+class UnsuitableLogError(RuntimeError):
+    pass
+
+
+class NoValidDataError(UnsuitableLogError):
+    pass
+
+
+class GeoFilterError(UnsuitableLogError):
+    pass
+
+
 def process_message(body: str, attributes: Dict[str, Any], base_tmp_dir: Path, keep: bool, debug: bool) -> None:
     """Replace this with your real work."""
 
     local_files = []
     s3 = build_s3_client()
-    logger.info("using tmp_dir=%s", base_tmp_dir)
+    logger.debug("using tmp_dir=%s", base_tmp_dir)
     file_index = FileIndex([])
 
     payload = json.loads(body) if body.strip().startswith("{") else {"body": body}
     pilot_assignment_id = payload.get("pilot_assignment_id")
-    logger.info("processing assignment_id=%s attrs=%s", payload.get("pilot_assignment_id"), attributes)
+    trip_type = payload.get("trip_type")
+    logger.info(f"processing {pilot_assignment_id=} {trip_type=} {attributes=}")
     tmp_dir = base_tmp_dir / pilot_assignment_id
     tmp_dir.mkdir(exist_ok=True)
 
-    # 0. find best overlap
-    interval, bag_files, video_files = find_best_overlap(payload["log_files"])
-    assert interval is not None, "No overlap in logs"
-    files_to_download = bag_files + video_files
-    valid_start_s = interval.start
-    valid_end_s = interval.end
-    assert valid_start_s < valid_end_s, "End time is below start time"
-    og_duration = int(payload["valid_end"]) - int(payload["valid_start"])
-    overlap_s = int(valid_end_s - valid_start_s)
-    logger.info(f"{overlap_s}s of overlap (lost {og_duration - overlap_s}s)")
+    try:
+        # 0. find best overlap
+        interval, bag_files, video_files = find_best_overlap(payload["log_files"])
+        assert interval is not None, "No overlap in logs"
+        if interval is None:
+            NoValidDataError("No overlap b/t bags and videos")
 
-    # 1. download all logs for a given trip. if any fail we should fail the entire log
-    local_files = download_logs(s3, files_to_download, tmp_dir)
-    file_index.add(local_files)
+        files_to_download = bag_files + video_files
+        valid_start_s = interval.start
+        valid_end_s = interval.end
+        assert valid_start_s < valid_end_s, "End time is below start time"
+        og_duration = int(payload["valid_end"]) - int(payload["valid_start"])
+        overlap_s = int(valid_end_s - valid_start_s)
+        logger.info(f"{overlap_s}s of overlap (lost {og_duration - overlap_s}s)")
 
-    # 2. convert any bags to mcap, unify them into one file, and then filter down to topics and time range we care about
-    # ... convert
-    bag_files = [f for f in local_files if f.endswith(".bag")]
-    bag_to_mcap = convert_bags_to_mcaps(bag_files, keep_bags=keep)
-    bag_mcap_files = bag_to_mcap.values()
-    file_index.replace(bag_to_mcap.keys(), bag_to_mcap.values())
+        # 1. download all logs for a given trip. if any fail we should fail the entire log
+        local_files = download_logs(s3, files_to_download, tmp_dir)
+        file_index.add(local_files)
 
-    # by this point we should have a temporary directory with the following structure:
-    # <tmp>
-    #    <name0>.mcap
-    #    ......
-    #    <nameN>.mcap
-    #
+        # 2. convert any bags to mcap, unify them into one file, and then filter down to topics and time range we care about
+        # ... convert
+        bag_files = [f for f in local_files if f.endswith(".bag")]
+        logger.info(f"Will convert {len(bag_files)} bag files")
+        bag_to_mcap = convert_bags_to_mcaps(bag_files, keep_bags=keep)
+        bag_mcap_files = bag_to_mcap.values()
+        file_index.replace(bag_to_mcap.keys(), bag_to_mcap.values())
 
-    # ... merge
-    unified_bag_fp = str(tmp_dir / "unifed_bags.mcap")
-    merge_mcaps(bag_mcap_files, unified_bag_fp, keep=keep)
-    file_index.replace(bag_mcap_files, unified_bag_fp)
+        # by this point we should have a temporary directory with the following structure:
+        # <tmp>
+        #    <name0>.mcap
+        #    ......
+        #    <nameN>.mcap
+        #
 
-    # ... pre filter early
-    unified_bag_filtered_fp = str(tmp_dir / "unifed_bags_filtered.mcap")
-    include_str = "".join([f' -y "{t}"   ' for t in TOPICS if "camera_info" not in t and "tf_static" not in t])
-    cmd = f"mcap filter {unified_bag_fp} {include_str} -s {int(valid_start_s)} -e {int(valid_end_s)} -o {unified_bag_filtered_fp}"
-    logged_cmd(cmd)
-    file_index.replace([unified_bag_fp], [unified_bag_filtered_fp])
-    if not keep:
-        remove_files([unified_bag_fp])
+        # ... merge
+        unified_bag_fp = str(tmp_dir / "unifed_bags.mcap")
+        merge_mcaps(bag_mcap_files, unified_bag_fp, keep=keep)
+        file_index.replace(bag_mcap_files, unified_bag_fp)
 
-    # directory now looks like this
-    # <tmp>
-    #   unifed_bags_filtered.mcap
-    #   <prefix0>_h264.mcap
-    #   ...
-    #   <prefixN>_h264.mcap
+        # ... pre filter early
+        unified_bag_filtered_fp = str(tmp_dir / "unifed_bags_filtered.mcap")
+        include_str = "".join([f' -y "{t}"   ' for t in TOPICS if "camera_info" not in t and "tf_static" not in t])
+        cmd = f"mcap filter {unified_bag_fp} {include_str} -s {int(valid_start_s)} -e {int(valid_end_s)} -o {unified_bag_filtered_fp}"
+        logged_cmd(cmd)
+        file_index.replace([unified_bag_fp], [unified_bag_filtered_fp])
+        if not keep:
+            remove_files([unified_bag_fp])
 
-    # 3) metadata computation
-    # 3a)
-    # We need to do some logic based on the gps trace. We want to:
-    #   1) clip the log to START after we're X meters from start and END X meters before destination
-    #   2) also compute an envelope to trim the route if we only have partial data for the trip
-    # TODO(Brad): conditionally do this based on trip_type
-    origin_pt = wkb.loads(bytes.fromhex(payload["origin_point_hexwkb"]))
-    destination_pt = wkb.loads(bytes.fromhex(payload["destination_point_hexwkb"]))
-    geo_valid_start_s, geo_valid_end_s, trace_env = find_valid_start_end_from_trace(unified_bag_filtered_fp, origin_pt, destination_pt)
-    assert geo_valid_start_s is not None, "no valid start found based on trace"
-    assert geo_valid_end_s is not None, "no valid end found based on trace"
-    if geo_valid_end_s < geo_valid_start_s:
-        raise ValueError("route based filter has end before start. This means there is probably no valid point")
-    valid_start_s = max(geo_valid_start_s, valid_start_s)
-    valid_end_s = min(geo_valid_end_s, valid_end_s)
-    assert valid_start_s < valid_end_s, "End time is below start time"
+        # directory now looks like this
+        # <tmp>
+        #   unifed_bags_filtered.mcap
+        #   <prefix0>_h264.mcap
+        #   ...
+        #   <prefixN>_h264.mcap
 
-    if debug:
-        geo_debug_fp = tmp_dir / "geo_debug.mcap"
-        write_out_geo_debug(geo_debug_fp, valid_start_s, origin_pt, destination_pt, trace_env)
-        file_index.add(geo_debug_fp)
+        # 3) metadata computation
+        # 3a)
+        # We need to do some logic based on the gps trace. We want to:
+        #   1) clip the log to START after we're X meters from start and END X meters before destination
+        #   2) also compute an envelope to trim the route if we only have partial data for the trip
+        should_mask_origin = payload["trip_type"] in ("DELIVERY_TRIP", "RETURN_TRIP")
+        should_mask_dest = payload["trip_type"] in ("DELIVERY_TRIP", "RETURN_TRIP", "JITP_TRIP")
 
-    # compute some additional metadata (will need for injecting calibration)
-    aux_vehicle_metadata = {}
-    gps_version = determine_gps_type(unified_bag_filtered_fp)
-    aux_vehicle_metadata["gps_version"] = gps_version
-    video_files = [f for f in file_index.files if f.endswith("h264.mcap")]
-    assert len(video_files) > 0, f"no video files found:  {file_index.files}"
-    cam_metadata = determine_camera_types(video_files[0])
-    aux_vehicle_metadata.update(cam_metadata)
+        origin_pt = wkb.loads(bytes.fromhex(payload["origin_point_hexwkb"])) if should_mask_origin else None
+        destination_pt = wkb.loads(bytes.fromhex(payload["destination_point_hexwkb"])) if should_mask_dest else None
+        geo_valid_start_s, geo_valid_end_s, trace_env = find_valid_start_end_from_trace(unified_bag_filtered_fp, origin_pt, destination_pt)
+        if geo_valid_start_s is None:
+            raise NoValidDataError("no valid start found based on trace")
+        if geo_valid_end_s is None:
+            raise NoValidDataError("no valid end found based on trace")
+        if geo_valid_end_s < geo_valid_start_s:
+            raise NoValidDataError("route based filter has end before start. This means there is probably no valid point")
+        valid_start_s = max(geo_valid_start_s, valid_start_s)
+        valid_end_s = min(geo_valid_end_s, valid_end_s)
+        if valid_start_s > valid_end_s:
+            raise NoValidDataError("End time is below start time")
 
-    # 4. inject any additional data (e.g. routes and map issues)
-    # ... map issues
-    map_issue_output = tmp_dir / "map_issues.mcap"
-    write_out_map_issues(map_issue_output, payload["map_issues"])
-    file_index.add(map_issue_output)
+        if debug:
+            geo_debug_fp = tmp_dir / "geo_debug.mcap"
+            write_out_geo_debug(geo_debug_fp, valid_start_s, origin_pt, destination_pt, trace_env)
+            file_index.add(geo_debug_fp)
 
-    # ... inject camera calibration (and tfs?)
-    calib_output = tmp_dir / "calibration.mcap"
-    write_out_camera_calibration(calib_output, aux_vehicle_metadata["camera_version"], valid_start_s)
-    file_index.add(calib_output)
+        # compute some additional metadata (will need for injecting calibration)
+        aux_vehicle_metadata = {}
+        gps_version = determine_gps_type(unified_bag_filtered_fp)
+        aux_vehicle_metadata["gps_version"] = gps_version
+        video_files = [f for f in file_index.files if f.endswith("h264.mcap")]
+        assert len(video_files) > 0, f"no video files found:  {file_index.files}"
+        cam_metadata = determine_camera_types(video_files[0])
+        aux_vehicle_metadata.update(cam_metadata)
 
-    # ... routes
-    route_output = tmp_dir / "routes.mcap"
-    write_out_routes(route_output, payload["routes"], valid_start_s, origin_pt, destination_pt, envelope=trace_env)
-    file_index.add(route_output)
+        # 4. inject any additional data (e.g. routes and map issues)
+        # ... map issues
+        map_issue_output = tmp_dir / "map_issues.mcap"
+        write_out_map_issues(map_issue_output, payload["map_issues"])
+        file_index.add(map_issue_output)
 
-    # Combine data into single mcap for the assignment
-    # ... merge
-    merged_output_fp = str(tmp_dir / "merged.mcap")
-    merge_mcaps(file_index.files, merged_output_fp, keep=keep)
+        # ... inject camera calibration (and tfs?)
+        calib_output = tmp_dir / "calibration.mcap"
+        write_out_camera_calibration(calib_output, aux_vehicle_metadata["camera_version"], valid_start_s)
+        file_index.add(calib_output)
 
-    # ... filter for specific topics and times
-    # filtered_output_fp = str(tmp_dir / "final.mcap")
-    filtered_output_fp = str(tmp_dir / "final.mcap")
-    include_str = "".join([f' -y "{t}"   ' for t in TOPICS])
-    cmd = f"mcap filter {merged_output_fp} {include_str} -s {int(valid_start_s)} -e {int(valid_end_s)} -o {filtered_output_fp}"
-    logged_cmd(cmd)
-    if not keep:
-        remove_files([merged_output_fp])
+        # ... routes
+        route_output = tmp_dir / "routes.mcap"
+        write_out_routes(route_output, payload["routes"], valid_start_s, origin_pt, destination_pt, envelope=trace_env)
+        file_index.add(route_output)
 
-    # 5. infer additional metadata
-    # ... check for existance of /point_one/pose
-    # ... check resolution of left/front/right cameras
-    existing_metadata = payload.get("external_metadata")
-    start_s, end_s, duration_s = get_mcap_timing(filtered_output_fp)
-    existing_metadata["clip_start_utc"] = datetime.fromtimestamp(start_s).isoformat() + "Z"
-    existing_metadata["clip_end_utc"] = datetime.fromtimestamp(end_s).isoformat() + "Z"
-    existing_metadata["clip_duration_seconds"] = duration_s
-    existing_metadata["vehicle"].update(aux_vehicle_metadata)
-    existing_metadata["clip_avg_speed"] = round(compute_avg_speed(filtered_output_fp), 2)
-    logger.info("parsed metadata=%s", json.dumps(existing_metadata))
+        # Combine data into single mcap for the assignment
+        # ... merge
+        merged_output_fp = str(tmp_dir / "merged.mcap")
+        merge_mcaps(file_index.files, merged_output_fp, keep=keep)
 
-    # 6. quality check
-    # ... check that all topics are there
-    # TODO(Brad): do this
-    if debug:
-        shutil.move(filtered_output_fp, base_tmp_dir / "final.mcap")
+        # ... filter for specific topics and times
+        # filtered_output_fp = str(tmp_dir / "final.mcap")
+        filtered_output_fp = str(tmp_dir / "final.mcap")
+        include_str = "".join([f' -y "{t}"   ' for t in TOPICS])
+        cmd = f"mcap filter {merged_output_fp} {include_str} -s {int(valid_start_s)} -e {int(valid_end_s)} -o {filtered_output_fp}"
+        logged_cmd(cmd)
+        if not keep:
+            remove_files([merged_output_fp])
 
-    # 7. cleanup
-    if not keep:
-        # TODO(Brad): remove after debugging
-        cleanup(tmp_dir)
+        # 5. infer additional metadata
+        # ... check for existance of /point_one/pose
+        # ... check resolution of left/front/right cameras
+        existing_metadata = payload.get("external_metadata")
+        start_s, end_s, duration_s = get_mcap_timing(filtered_output_fp)
+        existing_metadata["clip_start_utc"] = datetime.fromtimestamp(start_s).isoformat() + "Z"
+        existing_metadata["clip_end_utc"] = datetime.fromtimestamp(end_s).isoformat() + "Z"
+        existing_metadata["clip_duration_seconds"] = duration_s
+        existing_metadata["vehicle"].update(aux_vehicle_metadata)
+        existing_metadata["clip_avg_speed"] = round(compute_avg_speed(filtered_output_fp), 2)
+        logger.info("parsed metadata=%s", json.dumps(existing_metadata))
+
+        # 6. quality check
+        # ... check that all topics are there
+        # TODO(Brad): do this
+        if debug:
+            shutil.move(filtered_output_fp, base_tmp_dir / "final.mcap")
+    except NoValidDataError as e:
+        logger.warning(f"No valid data found. Will consume message from queue: {e}")
+    finally:
+        if not keep:
+            cleanup(tmp_dir)
+    logger.info(f"Processed {pilot_assignment_id}")
 
 
 def poll_loop(queue_url: str, *, max_messages: int, wait_time: int, visibility_timeout: int, once: bool, tmp_dir: Path, keep: bool, debug: bool) -> None:
@@ -480,7 +504,6 @@ def poll_loop(queue_url: str, *, max_messages: int, wait_time: int, visibility_t
                 process_message(msg.get("Body", ""), msg.get("MessageAttributes", {}), tmp_dir, keep=keep, debug=debug)
                 sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt)
             except Exception:
-                sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt)
                 logger.exception("message processing failed; leaving in queue")
 
         if once:

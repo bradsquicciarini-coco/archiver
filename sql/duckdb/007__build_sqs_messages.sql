@@ -48,6 +48,7 @@ map_issues as (
 select
     a.pilot_assignment_id,
     a.device_id,
+    p.trip_type,
     st_ashexwkb(ST_Point(p.origin_lng, p.origin_lat)) as origin_point_hexwkb,
     st_ashexwkb(ST_Point(p.destination_lng, p.destination_lat)) as destination_point_hexwkb,
     epoch(a.valid_start) as valid_start,

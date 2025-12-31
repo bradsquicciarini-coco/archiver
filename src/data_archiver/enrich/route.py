@@ -75,6 +75,8 @@ def write_out_geo_debug(output_fp: str, min_epoch_ts, origin_pt, dest_pt, envelo
     channel_debug = GeoJsonChannel(topic="/debug/pts")
     with foxglove.open_mcap(output_fp, allow_overwrite=True):
         for pt in [origin_pt, dest_pt]:
+            if pt is None:
+                continue
             circle = geodesic_circle_geojson(pt.xy[0][0], pt.xy[1][0], radius_m=50)
             circle_pb = GeoJson(geojson=json.dumps(circle))
             channel_debug.log(circle_pb, log_time=int(min_epoch_ts * 1e9))
@@ -113,7 +115,7 @@ def find_valid_start_end_from_trace(
     stay_away_dest=None,
     frequency_hz: float = 1.0,
     radius_m: float = 50.0,
-    buffer_m: float = 25.0,
+    buffer_m: float = 50.0,
 ) -> Tuple[Optional[float], Optional[float], Optional[any]]:
     period = 1.0 / max(float(frequency_hz), 1e-9)
     pts = []
@@ -159,71 +161,68 @@ def find_valid_start_end_from_trace(
     return start_ts, end_ts, trace
 
 
-def clip_route_keep_last_v2(route_geom, start_pt, end_pt, radius_m=50):
+def clip_route_keep_last_v2(route_geom, start_pt=None, end_pt=None, radius_m=50):
     """
     route_geom: LineString (lon, lat)
-    start_pt/end_pt: shapely Point (lon, lat)
+    start_pt/end_pt: shapely Point (lon, lat) or None
     """
-    start_lng, start_lat = start_pt.x, start_pt.y
-    end_lng, end_lat = end_pt.x, end_pt.y
+    centers = [(p.x, p.y) for p in (start_pt, end_pt) if p is not None]  # (lng, lat)
+    if not centers:
+        return route_geom  # nothing to clip against
 
     def min_dist_m(lng, lat):
-        return min(
-            haversine_m(lat, lng, start_lat, start_lng),
-            haversine_m(lat, lng, end_lat, end_lng),
-        )
+        return min(haversine_m(lat, lng, cy, cx) for cx, cy in centers)
 
-    # find first/last vertex outside the exclusion radius
-    start_idx, end_idx = None, None
-    for i, (lng, lat) in enumerate(route_geom.coords):
-        if min_dist_m(lng, lat) >= radius_m:
-            if start_idx is None:
-                start_idx = i
-            end_idx = i
-
-    if start_idx is None or end_idx is None:
+    def inside_center(lng, lat):
+        # Return (center_lng, center_lat) of the first center we're inside, else None
+        for cx, cy in centers:
+            if haversine_m(lat, lng, cy, cx) < radius_m:
+                return cx, cy
         return None
 
-    all_pts = list(route_geom.coords)
-    coarse_pts = all_pts[start_idx : end_idx + 1]
-
-    def _boundary_point(p_in, p_out, center_lng, center_lat, radius_m, iters=24):
-        # bisection along segment to hit distance ~= radius_m
-        a = p_in
-        b = p_out
+    def boundary_point(p_in, p_out, center, iters=24):
+        cx, cy = center
+        a, b = p_in, p_out
         for _ in range(iters):
             mid = ((a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5)
-            d = haversine_m(mid[1], mid[0], center_lat, center_lng)
-            if d < radius_m:
+            if haversine_m(mid[1], mid[0], cy, cx) < radius_m:
                 a = mid
             else:
                 b = mid
-        return b  # b is just outside; boundary is between a/b
+        return b  # just outside
 
-    # snap start to boundary if previous point was inside a radius
-    first_pt = coarse_pts[0]
+    all_pts = list(route_geom.coords)
+
+    # Find first/last vertex outside ALL exclusion circles (min_dist >= radius)
+    start_idx = end_idx = None
+    for i, (lng, lat) in enumerate(all_pts):
+        if min_dist_m(lng, lat) >= radius_m:
+            start_idx = i if start_idx is None else start_idx
+            end_idx = i
+
+    if start_idx is None:
+        return None
+
+    coarse = all_pts[start_idx : end_idx + 1]
+
+    # Snap start if previous point was inside any exclusion circle
+    first = coarse[0]
     if start_idx > 0:
-        prev_pt = all_pts[start_idx - 1]
-        d_prev_start = haversine_m(prev_pt[1], prev_pt[0], start_lat, start_lng)
-        d_prev_end = haversine_m(prev_pt[1], prev_pt[0], end_lat, end_lng)
-        if d_prev_start < radius_m:
-            first_pt = _boundary_point(prev_pt, first_pt, start_lng, start_lat, radius_m)
-        elif d_prev_end < radius_m:
-            first_pt = _boundary_point(prev_pt, first_pt, end_lng, end_lat, radius_m)
+        prev = all_pts[start_idx - 1]
+        center = inside_center(prev[0], prev[1])
+        if center:
+            first = boundary_point(prev, first, center)
 
-    # snap end to boundary if next point is inside a radius
-    last_pt = coarse_pts[-1]
+    # Snap end if next point is inside any exclusion circle
+    last = coarse[-1]
     if end_idx < len(all_pts) - 1:
-        next_pt = all_pts[end_idx + 1]
-        d_next_start = haversine_m(next_pt[1], next_pt[0], start_lat, start_lng)
-        d_next_end = haversine_m(next_pt[1], next_pt[0], end_lat, end_lng)
-        if d_next_start < radius_m:
-            last_pt = _boundary_point(next_pt, last_pt, start_lng, start_lat, radius_m)
-        elif d_next_end < radius_m:
-            last_pt = _boundary_point(next_pt, last_pt, end_lng, end_lat, radius_m)
+        nxt = all_pts[end_idx + 1]
+        center = inside_center(nxt[0], nxt[1])
+        if center:
+            last = boundary_point(nxt, last, center)
 
-    fine_pts = [first_pt] + coarse_pts[1:-1] + [last_pt]
-    return LineString(fine_pts)
+    pts = [first] + coarse[1:-1] + [last]
+    return LineString(pts)
 
 
 def clip_route_keep_last(route_geom, env):

@@ -30,10 +30,10 @@ TRIP-WORKER
 - [x] add speed metadata
 - [x] remove debug stuff
 - [x] video data is not always continguous. need to handle that (example: d2ed43bf-459d-4f10-974c-b35e459241b6)
-- [ ] clean up log level
-- [ ] no clean up during failure
-- [ ] don't clip Deployment trips
-- [ ] handle retryable errors and non-retryable errors
+- [x] clean up log level
+- [x] no clean up during failure
+- [x] don't clip Deployment trips
+- [x] handle retryable errors and non-retryable errors
 - [ ] upload to s3
       - [ ] name based on assignment_id
       - [ ] add metadata and try and reuse the old trip-clips table
