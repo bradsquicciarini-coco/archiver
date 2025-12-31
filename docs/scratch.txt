@@ -29,7 +29,8 @@ TRIP-WORKER
 - [ ] deployment
       - [ ] dockerfile
       - [ ] fill sqs queue
-      - [ ] infra to run it (spot instances)
+      - [ ] infra to run it (spot instances) 
+            - could add another node pool that uses spot workers
 - [ ] make dockerfile and infra code
 - [ ] handle retryable errors and non-retryable errors
 - [ ] video data is not always continguous. need to handle that
