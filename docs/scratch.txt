@@ -26,10 +26,15 @@ TRIP-WORKER
 - [x] merge into unified mcap for the trip
 - [x] infer additional metadata
 - [ ] store in in s3
+- [ ] deployment
+      - [ ] dockerfile
+      - [ ] fill sqs queue
+      - [ ] infra to run it (spot instances)
 - [ ] make dockerfile and infra code
 - [ ] handle retryable errors and non-retryable errors
 - [ ] video data is not always continguous. need to handle that
       - [ ] there isn't a ton of data with less than 90% video data so i think we can just find largest contiguous chunk and take that 
+- [ ] add speed metadata
 
 TODO
 - [ ] if clipping to valid ranges, we need to handle latched topics properly
