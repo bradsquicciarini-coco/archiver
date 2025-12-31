@@ -26,6 +26,7 @@ TRIP-WORKER
 - [x] merge into unified mcap for the trip
 - [x] infer additional metadata
 - [ ] store in in s3
+- [ ] make dockerfile and infra code
 
 TODO
 - [ ] if clipping to valid ranges, we need to handle latched topics properly
