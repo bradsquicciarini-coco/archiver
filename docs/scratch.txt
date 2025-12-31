@@ -130,3 +130,11 @@ TOPICS
 | /route/geojson                  | foxglove.GeoJSON [protobuf]                   | Routes associated with this segment. Note they are timestamp and a newer route means the route changed. |
 | /route/issue_report             | coco.MapReport [protobuf]                     | Any reports from the pilots of any map issues / obstructions they encounter                             |
 
+
+
+some problems:
+
+1. some clips have non contiguous video. in ordee to maximize data, we would need to use the 
+smalles unit of the fragments so this would be 1 minute.
+
+2. we also need to decide if we wany to send them full clips or 1 minute chunks.
