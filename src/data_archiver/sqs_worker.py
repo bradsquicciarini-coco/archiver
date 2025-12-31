@@ -21,7 +21,7 @@ from mcap_protobuf.decoder import DecoderFactory as ProtobufDecoderFactory
 from mcap.reader import make_reader
 
 from data_archiver.enrich.map_issue import write_out_map_issues
-from data_archiver.enrich.route import write_out_routes
+from data_archiver.enrich.route import find_valid_start_end_from_trace, write_out_routes
 
 
 LOGGER = logging.getLogger(__name__)
@@ -105,13 +105,10 @@ def infer_additional_vehicle_metadata(filepath: str):
                 continue
             if chan.topic == "robot.h264_video.front" and has_new_front_cam is None:
                 has_new_front_cam = is_new_cam(dmsg.metadata)
-                print(f"{has_new_front_cam=} {dmsg.metadata}")
             elif chan.topic == "robot.h264_video.right" and has_new_right_cam is None:
                 has_new_right_cam = is_new_cam(dmsg.metadata)
-                print(f"{has_new_right_cam=} {dmsg.metadata}")
             elif chan.topic == "robot.h264_video.left" and has_new_left_cam is None:
                 has_new_left_cam = is_new_cam(dmsg.metadata)
-                print(f"{has_new_left_cam=} {dmsg.metadata}")
 
             checked_all = all([v is not None for v in [has_new_front_cam, has_new_right_cam, has_new_left_cam]])
             if checked_all:
@@ -128,6 +125,15 @@ def infer_additional_vehicle_metadata(filepath: str):
             camera_version=camera_version,
             gps_version="2" if has_new_gps else "1",
         )
+
+
+# TODO(Brad): remove after merge
+def merge_mcaps(input_files, output_fp):
+    if os.path.exists(output_fp):
+        LOGGER.info(f"{output_fp} exists. skipping merge.")
+        return
+    cmd = f'mcap merge {" ".join([str(p) for p in input_files])} -o {output_fp}'
+    logged_cmd(cmd)
 
 
 def process_message(body: str, attributes: Dict[str, Any], tmp_dir: Path, keep_bags: bool) -> None:
@@ -196,9 +202,23 @@ def process_message(body: str, attributes: Dict[str, Any], tmp_dir: Path, keep_b
     #   1) we need to create a new mcap with map issues
     #   2) create a new mcap with geojson routes that have been clipped
 
-    # 3. inject any additional data (e.g. routes and map issues)
+    # 4. Combine data into single mcap for the assignment
+    # ... merge
+    unified_raw_log_fp = str(tmp_dir / "pre_merged.mcap")
+    merge_mcaps(local_files, unified_raw_log_fp)
+    local_files = [unified_raw_log_fp]  # now we only care about this one
+
+    # ... filter for specific topics and times
     valid_start_s = int(payload["valid_start"])
     valid_end_s = int(payload["valid_end"])
+    pre_merged_filtered_fp = str(tmp_dir / "pre_merged_filtered.mcap")
+    include_str = "".join([f' -y "{t}"   ' for t in TOPICS])
+    cmd = f"mcap filter {unified_raw_log_fp} {include_str} -s {int(valid_start_s)} -e {int(valid_end_s)} -o {pre_merged_filtered_fp}"
+    logged_cmd(cmd)
+    local_files = [pre_merged_filtered_fp]  # now we only care about this one
+
+    # 3. inject any additional data (e.g. routes and map issues)
+
     # ... map issues
     map_issue_output = tmp_dir / "map_issues.mcap"
     write_out_map_issues(map_issue_output, payload["map_issues"])
@@ -212,19 +232,21 @@ def process_message(body: str, attributes: Dict[str, Any], tmp_dir: Path, keep_b
     origin_pt = wkb.loads(bytes.fromhex(payload["origin_point_hexwkb"]))
     destination_pt = wkb.loads(bytes.fromhex(payload["destination_point_hexwkb"]))
     route_output = tmp_dir / "routes.mcap"
-    write_out_routes(route_output, payload["routes"], valid_start_s, origin_pt, destination_pt)
+    geo_valid_start_s, geo_valid_end_s, env = find_valid_start_end_from_trace(pre_merged_filtered_fp, origin_pt, destination_pt)
+    valid_start_s = max(geo_valid_start_s, valid_start_s)
+    valid_end_s = min(geo_valid_end_s, valid_end_s)
+    write_out_routes(route_output, payload["routes"], valid_start_s, origin_pt, destination_pt, envelope=env)
     local_files.append(route_output)
 
-    # 4. Combine data into single mcap for the assignment
+    # Combine data into single mcap for the assignment
     # ... merge
     merged_output_fp = str(tmp_dir / "merged.mcap")
-    cmd = f'mcap merge {" ".join([str(p) for p in local_files])} -o {merged_output_fp}'
-    logged_cmd(cmd)
+    merge_mcaps(local_files, merged_output_fp)
 
     # ... filter for specific topics and times
     filtered_output_fp = str(tmp_dir / "final.mcap")
     include_str = "".join([f' -y "{t}"   ' for t in TOPICS])
-    cmd = f"mcap filter {merged_output_fp} {include_str} -s {valid_start_s} -e {valid_end_s} -o {filtered_output_fp}"
+    cmd = f"mcap filter {merged_output_fp} {include_str} -s {int(valid_start_s)} -e {int(valid_end_s)} -o {filtered_output_fp}"
     logged_cmd(cmd)
 
     # 5. infer additional metadata
@@ -232,7 +254,6 @@ def process_message(body: str, attributes: Dict[str, Any], tmp_dir: Path, keep_b
     # ... check resolution of left/front/right cameras
     existing_metadata = payload.get("external_metadata")
     start_s, end_s, duration_s = get_mcap_timing(filtered_output_fp)
-    print(start_s, end_s, duration_s)
     existing_metadata["clip_start_utc"] = datetime.fromtimestamp(start_s).isoformat() + "Z"
     existing_metadata["clip_end_utc"] = datetime.fromtimestamp(end_s).isoformat() + "Z"
     existing_metadata["clip_duration_seconds"] = duration_s

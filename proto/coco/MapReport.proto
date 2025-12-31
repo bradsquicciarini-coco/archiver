@@ -29,4 +29,5 @@ enum IssueType {
   ISSUE_HOMELESS = 8;
   ISSUE_NO_CURB_CUT = 9;
   ISSUE_MOVABLE_OBJECT = 10;
+  ISSUE_CAR = 11;
 }
