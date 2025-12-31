@@ -26,21 +26,24 @@ TRIP-WORKER
 - [x] merge into unified mcap for the trip
 - [x] infer additional metadata
 - [x] add camera calibration
-- [ ] need to clean up files when we are done
-- [ ] add speed metadata
-- [ ] video data is not always continguous. need to handle that (example: d2ed43bf-459d-4f10-974c-b35e459241b6)
-      - [ ] there isn't a ton of data with less than 90% video data so i think we can just find largest contiguous chunk and take that 
+- [x] need to clean up files when we are done
+- [x] add speed metadata
+- [x] remove debug stuff
+- [x] video data is not always continguous. need to handle that (example: d2ed43bf-459d-4f10-974c-b35e459241b6)
+- [ ] clean up log level
+- [ ] no clean up during failure
+- [ ] don't clip Deployment trips
+- [ ] handle retryable errors and non-retryable errors
+- [ ] upload to s3
+      - [ ] name based on assignment_id
+      - [ ] add metadata and try and reuse the old trip-clips table
 - [ ] deployment
       - [ ] dockerfile
       - [ ] fill sqs queue
       - [ ] infra to run it (spot instances) 
             - could add another node pool that uses spot workers
-- [ ] upload to s3
-      - [ ] name based on assignment_id
-      - [ ] add metadata and try and reuse the old trip-clips table
 
 Later
-- [ ] handle retryable errors and non-retryable errors
 - [ ] how do we want to handle clips that are completely stationary (perhaps add metadata)
 
 

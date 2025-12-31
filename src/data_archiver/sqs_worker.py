@@ -9,6 +9,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -16,6 +17,7 @@ import time
 from typing import Any, Dict
 
 import boto3
+import numpy as np
 from shapely import wkb
 from mcap_ros1.decoder import DecoderFactory as Ros1DecoderFactory
 from mcap_protobuf.decoder import DecoderFactory as ProtobufDecoderFactory
@@ -23,8 +25,8 @@ from mcap.reader import make_reader
 
 from data_archiver.enrich.camera_calibration import write_out_camera_calibration
 from data_archiver.enrich.map_issue import write_out_map_issues
-from data_archiver.enrich.route import find_valid_start_end_from_trace, write_out_routes
-
+from data_archiver.enrich.route import find_valid_start_end_from_trace, write_out_geo_debug, write_out_routes
+from data_archiver.utils.overlap import find_best_overlap
 
 logger = logging.getLogger(__name__)
 
@@ -179,9 +181,11 @@ def infer_additional_vehicle_metadata(filepath: str):
 
 
 # TODO(Brad): remove after merge
-def merge_mcaps(input_files, output_fp):
+def merge_mcaps(input_files, output_fp, keep=False):
     cmd = f'mcap merge {" ".join([str(p) for p in input_files])} -o {output_fp}'
     logged_cmd(cmd)
+    if not keep:
+        remove_files(input_files)
 
 
 class LogDownloadError(RuntimeError):
@@ -265,7 +269,37 @@ class FileIndex:
         self.files += files
 
 
-def process_message(body: str, attributes: Dict[str, Any], base_tmp_dir: Path, keep_bags: bool) -> None:
+def cleanup(tmp_dir):
+    for file in os.listdir(tmp_dir):
+        fp = os.path.join(tmp_dir, file)
+        logger.info(f"Removing {fp}")
+        os.remove(fp)
+    logger.info(f"Removing {tmp_dir}")
+    os.rmdir(tmp_dir)
+
+
+def remove_files(files):
+    for file in files:
+        logger.info(f"Removing {file}")
+        os.remove(file)
+
+
+def compute_avg_speed(filepath: str, frequency_hz=1):
+    with open(filepath, "rb") as f:
+        reader = make_reader(f, decoder_factories=[Ros1DecoderFactory()])
+        speeds = []
+        last_t = float("-inf")
+        period = 1.0 / max(float(frequency_hz), 1e-9)
+        for _, _, msg, dmsg in reader.iter_decoded_messages(topics=["/speed_fb"]):
+            t = msg.log_time / 1e9
+            if t - last_t < period:
+                continue
+            last_t = t
+            speeds.append(dmsg.car_speed)
+        return np.array(speeds).mean()
+
+
+def process_message(body: str, attributes: Dict[str, Any], base_tmp_dir: Path, keep: bool, debug: bool) -> None:
     """Replace this with your real work."""
 
     local_files = []
@@ -279,14 +313,25 @@ def process_message(body: str, attributes: Dict[str, Any], base_tmp_dir: Path, k
     tmp_dir = base_tmp_dir / pilot_assignment_id
     tmp_dir.mkdir(exist_ok=True)
 
+    # 0. find best overlap
+    interval, bag_files, video_files = find_best_overlap(payload["log_files"])
+    assert interval is not None, "No overlap in logs"
+    files_to_download = bag_files + video_files
+    valid_start_s = interval.start
+    valid_end_s = interval.end
+    assert valid_start_s < valid_end_s, "End time is below start time"
+    og_duration = int(payload["valid_end"]) - int(payload["valid_start"])
+    overlap_s = int(valid_end_s - valid_start_s)
+    logger.info(f"{overlap_s}s of overlap (lost {og_duration - overlap_s}s)")
+
     # 1. download all logs for a given trip. if any fail we should fail the entire log
-    local_files = download_logs(s3, payload["log_files"], tmp_dir)
+    local_files = download_logs(s3, files_to_download, tmp_dir)
     file_index.add(local_files)
 
     # 2. convert any bags to mcap, unify them into one file, and then filter down to topics and time range we care about
     # ... convert
     bag_files = [f for f in local_files if f.endswith(".bag")]
-    bag_to_mcap = convert_bags_to_mcaps(bag_files, keep_bags=keep_bags)
+    bag_to_mcap = convert_bags_to_mcaps(bag_files, keep_bags=keep)
     bag_mcap_files = bag_to_mcap.values()
     file_index.replace(bag_to_mcap.keys(), bag_to_mcap.values())
 
@@ -299,18 +344,17 @@ def process_message(body: str, attributes: Dict[str, Any], base_tmp_dir: Path, k
 
     # ... merge
     unified_bag_fp = str(tmp_dir / "unifed_bags.mcap")
-    merge_mcaps(bag_mcap_files, unified_bag_fp)
+    merge_mcaps(bag_mcap_files, unified_bag_fp, keep=keep)
     file_index.replace(bag_mcap_files, unified_bag_fp)
 
     # ... pre filter early
-    valid_start_s = int(payload["valid_start"])
-    valid_end_s = int(payload["valid_end"])
-    assert valid_start_s < valid_end_s, "End time is below start time"
     unified_bag_filtered_fp = str(tmp_dir / "unifed_bags_filtered.mcap")
     include_str = "".join([f' -y "{t}"   ' for t in TOPICS if "camera_info" not in t and "tf_static" not in t])
     cmd = f"mcap filter {unified_bag_fp} {include_str} -s {int(valid_start_s)} -e {int(valid_end_s)} -o {unified_bag_filtered_fp}"
     logged_cmd(cmd)
     file_index.replace([unified_bag_fp], [unified_bag_filtered_fp])
+    if not keep:
+        remove_files([unified_bag_fp])
 
     # directory now looks like this
     # <tmp>
@@ -336,6 +380,11 @@ def process_message(body: str, attributes: Dict[str, Any], base_tmp_dir: Path, k
     valid_end_s = min(geo_valid_end_s, valid_end_s)
     assert valid_start_s < valid_end_s, "End time is below start time"
 
+    if debug:
+        geo_debug_fp = tmp_dir / "geo_debug.mcap"
+        write_out_geo_debug(geo_debug_fp, valid_start_s, origin_pt, destination_pt, trace_env)
+        file_index.add(geo_debug_fp)
+
     # compute some additional metadata (will need for injecting calibration)
     aux_vehicle_metadata = {}
     gps_version = determine_gps_type(unified_bag_filtered_fp)
@@ -351,7 +400,6 @@ def process_message(body: str, attributes: Dict[str, Any], base_tmp_dir: Path, k
     write_out_map_issues(map_issue_output, payload["map_issues"])
     file_index.add(map_issue_output)
 
-    # TODO(Brad)
     # ... inject camera calibration (and tfs?)
     calib_output = tmp_dir / "calibration.mcap"
     write_out_camera_calibration(calib_output, aux_vehicle_metadata["camera_version"], valid_start_s)
@@ -365,7 +413,7 @@ def process_message(body: str, attributes: Dict[str, Any], base_tmp_dir: Path, k
     # Combine data into single mcap for the assignment
     # ... merge
     merged_output_fp = str(tmp_dir / "merged.mcap")
-    merge_mcaps(file_index.files, merged_output_fp)
+    merge_mcaps(file_index.files, merged_output_fp, keep=keep)
 
     # ... filter for specific topics and times
     # filtered_output_fp = str(tmp_dir / "final.mcap")
@@ -373,6 +421,8 @@ def process_message(body: str, attributes: Dict[str, Any], base_tmp_dir: Path, k
     include_str = "".join([f' -y "{t}"   ' for t in TOPICS])
     cmd = f"mcap filter {merged_output_fp} {include_str} -s {int(valid_start_s)} -e {int(valid_end_s)} -o {filtered_output_fp}"
     logged_cmd(cmd)
+    if not keep:
+        remove_files([merged_output_fp])
 
     # 5. infer additional metadata
     # ... check for existance of /point_one/pose
@@ -383,14 +433,22 @@ def process_message(body: str, attributes: Dict[str, Any], base_tmp_dir: Path, k
     existing_metadata["clip_end_utc"] = datetime.fromtimestamp(end_s).isoformat() + "Z"
     existing_metadata["clip_duration_seconds"] = duration_s
     existing_metadata["vehicle"].update(aux_vehicle_metadata)
+    existing_metadata["clip_avg_speed"] = round(compute_avg_speed(filtered_output_fp), 2)
     logger.info("parsed metadata=%s", json.dumps(existing_metadata))
 
     # 6. quality check
     # ... check that all topics are there
     # TODO(Brad): do this
+    if debug:
+        shutil.move(filtered_output_fp, base_tmp_dir / "final.mcap")
+
+    # 7. cleanup
+    if not keep:
+        # TODO(Brad): remove after debugging
+        cleanup(tmp_dir)
 
 
-def poll_loop(queue_url: str, *, max_messages: int, wait_time: int, visibility_timeout: int, once: bool, tmp_dir: Path, keep_bags: bool) -> None:
+def poll_loop(queue_url: str, *, max_messages: int, wait_time: int, visibility_timeout: int, once: bool, tmp_dir: Path, keep: bool, debug: bool) -> None:
     sqs = build_sqs_client()
     should_stop = False
 
@@ -419,7 +477,7 @@ def poll_loop(queue_url: str, *, max_messages: int, wait_time: int, visibility_t
         for msg in messages:
             receipt = msg["ReceiptHandle"]
             try:
-                process_message(msg.get("Body", ""), msg.get("MessageAttributes", {}), tmp_dir, keep_bags=keep_bags)
+                process_message(msg.get("Body", ""), msg.get("MessageAttributes", {}), tmp_dir, keep=keep, debug=debug)
                 sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt)
             except Exception:
                 sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt)
@@ -436,7 +494,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wait-time", type=int, default=10, help="Long poll wait time (seconds)")
     parser.add_argument("--visibility-timeout", type=int, default=30, help="Visibility timeout (seconds)")
     parser.add_argument("--once", action="store_true", help="Process a single poll and exit")
-    parser.add_argument("--keep-bags", action="store_true")
+    parser.add_argument("--keep", action="store_true")
+    parser.add_argument("--debug", action="store_true")
     parser.add_argument("--tmp-dir", help="Override temp directory path")
     parser.add_argument(
         "--persist-tmp",
@@ -466,7 +525,8 @@ def main() -> int:
         visibility_timeout=args.visibility_timeout,
         once=args.once,
         tmp_dir=tmp_dir,
-        keep_bags=args.keep_bags,
+        keep=args.keep,
+        debug=args.debug,
     )
     return 0
 

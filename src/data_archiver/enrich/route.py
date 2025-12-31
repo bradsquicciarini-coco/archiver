@@ -37,7 +37,6 @@ def geodesic_circle_geojson(lon: float, lat: float, radius_m: float, steps: int 
 
 def write_out_routes(output_fp: str, routes, min_epoch_ts, origin_pt, dest_pt, envelope=None, topic="/route/geojson"):
     channel = GeoJsonChannel(topic=topic)
-    channel_debug = GeoJsonChannel(topic="/debug/pts")
 
     start_idx = 0
     for i, r in enumerate(routes):
@@ -70,7 +69,11 @@ def write_out_routes(output_fp: str, routes, min_epoch_ts, origin_pt, dest_pt, e
             route_pb = GeoJson(geojson=json.dumps(geojson))
             channel.log(route_pb, log_time=int(start_ts * 1e9))
 
-        # debug
+
+def write_out_geo_debug(output_fp: str, min_epoch_ts, origin_pt, dest_pt, envelope=None):
+    # debug
+    channel_debug = GeoJsonChannel(topic="/debug/pts")
+    with foxglove.open_mcap(output_fp, allow_overwrite=True):
         for pt in [origin_pt, dest_pt]:
             circle = geodesic_circle_geojson(pt.xy[0][0], pt.xy[1][0], radius_m=50)
             circle_pb = GeoJson(geojson=json.dumps(circle))
