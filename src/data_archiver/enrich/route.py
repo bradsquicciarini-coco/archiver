@@ -2,6 +2,7 @@ import base64
 from datetime import datetime
 import json
 import math
+from typing import Optional, Tuple
 import foxglove
 from shapely import LineString, wkb
 from shapely.geometry import mapping
@@ -74,9 +75,11 @@ def write_out_routes(output_fp: str, routes, min_epoch_ts, origin_pt, dest_pt, e
             circle = geodesic_circle_geojson(pt.xy[0][0], pt.xy[1][0], radius_m=50)
             circle_pb = GeoJson(geojson=json.dumps(circle))
             channel_debug.log(circle_pb, log_time=int(min_epoch_ts * 1e9))
-        env_geojson = {"type": "Feature", "geometry": mapping(envelope)}
-        env_pb = GeoJson(geojson=json.dumps(env_geojson))
-        channel_debug.log(env_pb, log_time=int(min_epoch_ts * 1e9))
+
+        if envelope is not None:
+            env_geojson = {"type": "Feature", "geometry": mapping(envelope)}
+            env_pb = GeoJson(geojson=json.dumps(env_geojson))
+            channel_debug.log(env_pb, log_time=int(min_epoch_ts * 1e9))
 
 
 # TODO(Brad): need to "anonymize ths". Probably should be something like
@@ -101,57 +104,55 @@ def haversine_m(lat1, lon1, lat2, lon2):
     return r * c
 
 
-def find_valid_start_end_from_trace(filepath: str, stay_away_origin=None, stay_away_dest=None, frequency_hz=1, radius_m=50):
-    """
-    - find first timestamp where we leave the 50m (start_ts)
-    - find first timestamp where we enter the dropoff (end_ts)
-    - build up an envelope for the entire trace
-
-    for the route, we should walk the route, find the first point that enters the bounds and the last one that leaves it
-
-    """
-    period = 1 / frequency_hz
+def find_valid_start_end_from_trace(
+    filepath: str,
+    stay_away_origin=None,
+    stay_away_dest=None,
+    frequency_hz: float = 1.0,
+    radius_m: float = 50.0,
+    buffer_m: float = 25.0,
+) -> Tuple[Optional[float], Optional[float], Optional[any]]:
+    period = 1.0 / max(float(frequency_hz), 1e-9)
     pts = []
-    start_ts = None
-    end_ts = None
+    start_ts = end_ts = None
+    last_t = float("-inf")
+    buffer_deg = buffer_m / 111_320.0
+
+    def far_enough(lat, lon, p) -> bool:
+        if p is None:
+            return True
+        # p is a shapely Point: x=lon, y=lat
+        return haversine_m(lat, lon, p.y, p.x) > radius_m
+
     with open(filepath, "rb") as f:
         reader = make_reader(f, decoder_factories=[Ros1DecoderFactory(), ProtobufDecoderFactory()])
-        last_t = 0
-        for _, chan, msg, dmsg in reader.iter_decoded_messages(topics=["/acu_driver/gps_nav_topic"]):
-            # import pdb
-
-            # pdb.set_trace()
+        for _, _, msg, dmsg in reader.iter_decoded_messages(topics=["/acu_driver/gps_nav_topic"]):
             t = msg.log_time / 1e9
-            dt = t - last_t
-            if dt >= period:
-                lng, lat = dmsg.longitude, dmsg.latitude
+            if t - last_t < period:
+                continue
+            last_t = t
 
-                # starting point
-                valid = False
-                if start_ts is None:
-                    if stay_away_origin is not None:
-                        dist = haversine_m(lat, lng, stay_away_origin.xy[1][0], stay_away_origin.xy[0][0])
-                        if dist > radius_m:
-                            start_ts = t
-                            valid = True
-                    else:
-                        start_ts = t
+            lon, lat = dmsg.longitude, dmsg.latitude
+            include = False
 
-                # ending point point
-                if stay_away_dest is not None:
-                    dist = haversine_m(lat, lng, stay_away_dest.xy[1][0], stay_away_dest.xy[0][0])
-                    if dist > radius_m:
-                        end_ts = t
-                        valid = True
-                else:
-                    end_ts = t
+            if start_ts is None:
+                if not far_enough(lat, lon, stay_away_origin):
+                    continue
+                start_ts = t
+                include = True
 
-                if valid:
-                    pts.append([dmsg.longitude, dmsg.latitude])
-                last_t = t
+            if far_enough(lat, lon, stay_away_dest):
+                end_ts = t
+                include = True
 
-    trace = LineString(pts).buffer(0.0002245777937)
-    # TODO(Brad): handle errors
+            if include:
+                pts.append((lon, lat))
+
+    if start_ts is None or len(pts) < 2:
+        return None, None, None
+
+    trace = LineString(pts).buffer(buffer_deg)
+
     return start_ts, end_ts, trace
 
 

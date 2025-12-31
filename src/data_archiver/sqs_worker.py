@@ -234,6 +234,8 @@ def process_message(body: str, attributes: Dict[str, Any], tmp_dir: Path, keep_b
     destination_pt = wkb.loads(bytes.fromhex(payload["destination_point_hexwkb"]))
     route_output = tmp_dir / "routes.mcap"
     geo_valid_start_s, geo_valid_end_s, env = find_valid_start_end_from_trace(pre_merged_filtered_fp, origin_pt, destination_pt)
+    assert geo_valid_start_s is not None, "no valid start found based on trace"
+    assert geo_valid_end_s is not None, "no valid end found based on trace"
     if geo_valid_end_s < geo_valid_start_s:
         raise ValueError("route based filter has end before start. This means there is probably no valid point")
 
