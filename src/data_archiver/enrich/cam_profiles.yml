@@ -1,0 +1,74 @@
+cameras:
+  front:
+    frame_id: camera_front
+    resolution: { w: 1920, h: 1080 }
+    intrinsics:
+      { fx: 806.268597133312, fy: 806.268597133312, cx: 983.133760167798, cy: 577.0671159198689 }
+    distortion_model: kannala_brandt
+    D: [-0.02180707171942834, -0.0034984504029290384, 0.0032833669497744646, -0.0005265714696300307]
+  left:
+    frame_id: camera_left
+    resolution: { w: 1920, h: 1080 }
+    intrinsics:
+      { fx: 804.9449667623501, fy: 804.9449667623501, cx: 982.9904531769492, cy: 581.140191787464 }
+    distortion_model: kannala_brandt
+    D: [-0.022784497171456676, -0.0018878529353653474, 0.002030345297103312, -0.00011208981634427548]
+  right:
+    frame_id: camera_right
+    resolution: { w: 1920, h: 1080 }
+    intrinsics:
+      { fx: 803.1210767918043, fy: 803.1210767918043, cx: 930.5744294235496, cy: 517.0782755001966 }
+    distortion_model: kannala_brandt
+    D: [-0.026709993147140357, 0.004018654022581403, -0.0016721148742629452, 0.0007454096061152268]
+  back:
+    frame_id: camera_back
+    resolution: { w: 1280, h: 720 }
+    intrinsics:
+      # { fx: 426.5028545693302, fy: 426.5028545693302, cx: 626.3298767917506, cy: 382.53121853008065 }
+      { fx: 426, fy: 426, cx: 640, cy: 360 }
+    distortion_model: kannala_brandt
+    D: [-0.019407099903528516, -0.002535398816348152, 0.001782184560502267, -0.0007429497477145885]
+
+# exclude_default_transforms will disable publishing ALL default tfs. If this is true, you must publish all tfs
+# exclude_default_transforms: false
+
+# transforms is just a list of transforms to either publish or override defaults
+#
+# Keys are matched based on the child frame, which will allow reparenting. For example, if the default tf for
+# the right camera is base_link->camera_right. If camera_front->camera_right is provided, it will override the default
+# base_link->camera_right one.
+transforms:
+  - parent: camera_front
+    child: camera_right
+    translation: [0.23182415309972176, 0.0010661919118896022, -0.07330300377544449]
+    rotation: [0.03218676865571589, 0.7022138003038931, 0.0032122519642716458, 0.711230955473386]
+
+  - parent: camera_front
+    child: camera_left
+    translation: [-0.23247253332514484, -0.0011412816454383578, -0.08043652985593784]
+    rotation: [-0.0171300263054966, -0.7135528847925547, -0.017067340777925835, 0.7001839391772466]
+
+  - parent: camera_right
+    child: camera_back
+    translation: [0.5907499802345537, -0.021162228150786916, -0.2370295138957366]
+    rotation: [-0.01678009721222778, 0.7079992417375746, -0.023352452707880413, 0.7056274973306341]
+
+  - parent: base_link
+    child: base_link_ground
+    translation: [0., 0., -0.4545]
+    rotation: [0., 0., 0., 1.]
+
+  - parent: base_link
+    child: gps
+    translation: [0.1235, 0.04444, 0.]
+    rotation: [0., 0., 0., 1.]   
+
+  - parent: base_link
+    child: imu
+    translation: [0.000, -0.000, -0.260]
+    rotation: [-0.000, -0.000, -0.707, 0.707]
+
+  - parent: base_link
+    child: camera_front
+    translation: [0.38243, 0., 0.]
+    rotation: [-0.5, 0.5, -0.5, 0.5]
