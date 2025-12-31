@@ -29,36 +29,11 @@ TRIP-WORKER
 - [ ] make dockerfile and infra code
 - [ ] handle retryable errors and non-retryable errors
 - [ ] video data is not always continguous. need to handle that
+      - [ ] there isn't a ton of data with less than 90% video data so i think we can just find largest contiguous chunk and take that 
 
 TODO
 - [ ] if clipping to valid ranges, we need to handle latched topics properly
 - [ ] how do we want to handle clips that are completely stationary?
-
-
-```
-assignment_id=4b71112a-6729-4863-8fec-138f0e986c91
-Traceback (most recent call last):
-  File "/Users/bradsquicciarini/coco/data-archiver/src/data_archiver/sqs_worker.py", line 304, in poll_loop
-    process_message(msg.get("Body", ""), msg.get("MessageAttributes", {}), tmp_dir, keep_bags=keep_bags)
-    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/bradsquicciarini/coco/data-archiver/src/data_archiver/sqs_worker.py", line 236, in process_message
-    geo_valid_start_s, geo_valid_end_s, env = find_valid_start_end_from_trace(pre_merged_filtered_fp, origin_pt, destination_pt)
-                                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/bradsquicciarini/coco/data-archiver/src/data_archiver/enrich/route.py", line 153, in find_valid_start_end_from_trace
-    trace = LineString(pts).buffer(0.0002245777937)
-            ~~~~~~~~~~^^^^^
-  File "/Users/bradsquicciarini/coco/data-archiver/.venv/lib/python3.14/site-packages/shapely/geometry/linestring.py", line 76, in __new__
-    geom = shapely.linestrings(coordinates)
-  File "/Users/bradsquicciarini/coco/data-archiver/.venv/lib/python3.14/site-packages/shapely/decorators.py", line 173, in wrapper
-    result = func(*args, **kwargs)
-  File "/Users/bradsquicciarini/coco/data-archiver/.venv/lib/python3.14/site-packages/shapely/decorators.py", line 88, in wrapped
-    return func(*args, **kwargs)
-  File "/Users/bradsquicciarini/coco/data-archiver/.venv/lib/python3.14/site-packages/shapely/creation.py", line 218, in linestrings
-    return lib.linestrings(coords, np.intc(handle_nan), out=out, **kwargs)
-           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-shapely.errors.GEOSException: IllegalArgumentException: point array must contain 0 or >1 elements
-```
-
 
 
 QUEUE
@@ -67,18 +42,6 @@ QUEUE
 
 if we can keep the payload under 1 Mib, we just put everything required in the SQS message
 
-message format:
-```
-  pilot_assignment_id  : pilot assignment id 
-  device_id            : device id for this
-  valid_start          : starting timestamp where both bags and video exists
-  valid_end            : similar but the end
-  valid_length_seconds : length of overlapping logs
-  files                : list of files 
-  n_files              : number of files
-```
-
-Q: should we include all the metadata in here? -> yes lets front load as much as possible
 
 WORKER (can we do this in go? will make scheduling workers easier)
 ----------
@@ -128,42 +91,21 @@ METADATA
 | vehicle.camera_version   | 1 / 1.5-1 / 1.5-3                              | <FILE>                |
 | vehicle.gps_version      | 1 /2                                           | <FILE>                |
 
-| name                   | how to calc                                               |
-| ---------------------- | --------------------------------------------------------- |
-| vehicle.vehicle_model  | if any are the new cameras                                |
-| vehicle.camera_version | check left /right /front image shapes (can do w/o decode) |
-| vehicle.gps_version    | check for presence of /point_one/pose                     |
-| clip_start_utc         | simple                                                    |
-| clip_end_utc           | simple                                                    |
-| clip_avg_speed         | avg /car_speed     (already ahve)                                       |
 
+PROBLEMS
+--------------
+Q: some clips have non contiguous video. in ordee to maximize data, we would need to use the 
+smalles unit of the fragments so this would be 1 minute. we also need to decide if we wany to send 
+them full clips or 1 minute chunks
 
-TOPICS
-----------
-| Topic Name                      | Format                                        | Description                                                                                             |
-| ------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| robot.h264_video.back           | foxglove.CompressedVideo [protobuf]           | Back camera, landscape, 720p, 20hz                                                                      |
-| robot.h264_video.front          | foxglove.CompressedVideo [protobuf]           | Front camera, portrait, 720p, 20hz                                                                      |
-| robot.h264_video.left           | foxglove.CompressedVideo [protobuf]           | Left camera, landscape, 720p, 20hz                                                                      |
-| robot.h264_video.right          | foxglove.CompressedVideo [protobuf]           | Right camera, landscape, 720p, 20hz                                                                     |
-| /acu_driver/gps_nav_topic       | sensor_msgs/NavSatFix [ros1msg]               | Either raw gps or lat/lng from /point_one/pose                                                          |
-| /imu                            | sensor_msgs/Imu [ros1msg]                     | 6DOF IMU on the robot                                                                                   |
-| /point_one/pose                 | gps_driver/Pose [ros1msg]                     | RTK GPS + IMU Fused pose estimate                                                                       |
-| /speed_fb                       | segway_msgs/speed_fb [ros1msg]                | Scalar values for velocity                                                                              |
-| /odom                           | nav_msgs/Odometry [ros1msg]                   | Wheel + IMU fused odom                                                                                  |
-| /joy/selected                   | sensor_msgs/Joy [ros1msg]                     | Raw joystick msg from pilot                                                                             |
-| /cmd_vel/joystick/raw           | geometry_msgs/TwistStamped [ros1msg]          | Raw command from pilot                                                                                  |
-| /cmd_vel                        | geometry_msgs/TwistStamped [ros1msg]          | Command sent to base after filtering                                                                    |
-| /object_detection/detections_2d | object_detection_msgs/CameraDetections2DArray | [ros1msg] 2D boxes from front, left, and right camera.                                                  |
-| /object_detection/detections_3d | object_detection_msgs/CameraDetections3DArray | [ros1msg] 3D boxes from front, left, and right camera via IPM                                           |
-| /route/geojson                  | foxglove.GeoJSON [protobuf]                   | Routes associated with this segment. Note they are timestamp and a newer route means the route changed. |
-| /route/issue_report             | coco.MapReport [protobuf]                     | Any reports from the pilots of any map issues / obstructions they encounter                             |
+I think we can kill two birds with one stone give most samples have contiguous chunks
+- only take samples that have > 90% video coverage
+- take the largest contiguous block
+- then we'll just send them trips
 
+Q: Should we 
+  1. prefilter trips and stick them in s3. then we can just pull from s3 and ship it or...
+  2. compute metadata for when to clip the trip then do it during tarring
 
-
-some problems:
-
-1. some clips have non contiguous video. in ordee to maximize data, we would need to use the 
-smalles unit of the fragments so this would be 1 minute.
-
-2. we also need to decide if we wany to send them full clips or 1 minute chunks.
+  #1 puts the complexity before its in s3, but we lose some data and won't have any parking data
+  #2 would require some work during tarring but would give us some parking data
