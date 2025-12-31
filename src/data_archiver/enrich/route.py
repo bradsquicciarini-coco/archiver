@@ -48,8 +48,16 @@ def write_out_routes(output_fp: str, routes, min_epoch_ts, origin_pt, dest_pt, e
             start_ts = max(r["active_start"], min_epoch_ts)
             geom = wkb.loads(base64.b64decode(r["geom_b64"]))
             clipped_route = clip_route_keep_last_v2(geom, origin_pt, dest_pt)
+            if clipped_route is None:
+                print(f'route is empty {r["id"]=}')
+                continue
+
             if envelope:
                 clipped_route = clip_route_keep_last(clipped_route, envelope)
+            if clipped_route is None:
+                print(f'route is empty {r["id"]=}')
+                continue
+
             geojson = {
                 "type": "Feature",
                 "geometry": mapping(clipped_route),

@@ -211,6 +211,7 @@ def process_message(body: str, attributes: Dict[str, Any], tmp_dir: Path, keep_b
     # ... filter for specific topics and times
     valid_start_s = int(payload["valid_start"])
     valid_end_s = int(payload["valid_end"])
+    assert valid_start_s < valid_end_s, "End time is below start time"
     pre_merged_filtered_fp = str(tmp_dir / "pre_merged_filtered.mcap")
     include_str = "".join([f' -y "{t}"   ' for t in TOPICS])
     cmd = f"mcap filter {unified_raw_log_fp} {include_str} -s {int(valid_start_s)} -e {int(valid_end_s)} -o {pre_merged_filtered_fp}"
@@ -233,8 +234,12 @@ def process_message(body: str, attributes: Dict[str, Any], tmp_dir: Path, keep_b
     destination_pt = wkb.loads(bytes.fromhex(payload["destination_point_hexwkb"]))
     route_output = tmp_dir / "routes.mcap"
     geo_valid_start_s, geo_valid_end_s, env = find_valid_start_end_from_trace(pre_merged_filtered_fp, origin_pt, destination_pt)
+    if geo_valid_end_s < geo_valid_start_s:
+        raise ValueError("route based filter has end before start. This means there is probably no valid point")
+
     valid_start_s = max(geo_valid_start_s, valid_start_s)
     valid_end_s = min(geo_valid_end_s, valid_end_s)
+    assert valid_start_s < valid_end_s, "End time is below start time"
     write_out_routes(route_output, payload["routes"], valid_start_s, origin_pt, destination_pt, envelope=env)
     local_files.append(route_output)
 
@@ -244,6 +249,7 @@ def process_message(body: str, attributes: Dict[str, Any], tmp_dir: Path, keep_b
     merge_mcaps(local_files, merged_output_fp)
 
     # ... filter for specific topics and times
+    # filtered_output_fp = str(tmp_dir / "final.mcap")
     filtered_output_fp = str(tmp_dir / "final.mcap")
     include_str = "".join([f' -y "{t}"   ' for t in TOPICS])
     cmd = f"mcap filter {merged_output_fp} {include_str} -s {int(valid_start_s)} -e {int(valid_end_s)} -o {filtered_output_fp}"
@@ -298,6 +304,7 @@ def poll_loop(queue_url: str, *, max_messages: int, wait_time: int, visibility_t
                 process_message(msg.get("Body", ""), msg.get("MessageAttributes", {}), tmp_dir, keep_bags=keep_bags)
                 sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt)
             except Exception:
+                sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt)
                 LOGGER.exception("message processing failed; leaving in queue")
 
         if once:

@@ -18,14 +18,20 @@ def main() -> None:
     create_resp = sqs.create_queue(QueueName=queue_name)
     queue_url = create_resp["QueueUrl"]
 
-    with open(sys.argv[1], "r") as f:
-        example_payload = json.load(f)
-
-    sqs.send_message(
-        QueueUrl=queue_url,
-        MessageBody=json.dumps(example_payload),
-        MessageAttributes={"source": {"DataType": "String", "StringValue": "localstack"}},
-    )
+    input_path = sys.argv[1]
+    with open(input_path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            payload = json.loads(line)
+            sqs.send_message(
+                QueueUrl=queue_url,
+                MessageBody=json.dumps(payload),
+                MessageAttributes={
+                    "source": {"DataType": "String", "StringValue": "localstack"}
+                },
+            )
 
     print(queue_url)
 

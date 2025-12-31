@@ -27,9 +27,37 @@ TRIP-WORKER
 - [x] infer additional metadata
 - [ ] store in in s3
 - [ ] make dockerfile and infra code
+- [ ] handle retryable errors and non-retryable errors
+- [ ] video data is not always continguous. need to handle that
 
 TODO
 - [ ] if clipping to valid ranges, we need to handle latched topics properly
+- [ ] how do we want to handle clips that are completely stationary?
+
+
+```
+assignment_id=4b71112a-6729-4863-8fec-138f0e986c91
+Traceback (most recent call last):
+  File "/Users/bradsquicciarini/coco/data-archiver/src/data_archiver/sqs_worker.py", line 304, in poll_loop
+    process_message(msg.get("Body", ""), msg.get("MessageAttributes", {}), tmp_dir, keep_bags=keep_bags)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bradsquicciarini/coco/data-archiver/src/data_archiver/sqs_worker.py", line 236, in process_message
+    geo_valid_start_s, geo_valid_end_s, env = find_valid_start_end_from_trace(pre_merged_filtered_fp, origin_pt, destination_pt)
+                                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/bradsquicciarini/coco/data-archiver/src/data_archiver/enrich/route.py", line 153, in find_valid_start_end_from_trace
+    trace = LineString(pts).buffer(0.0002245777937)
+            ~~~~~~~~~~^^^^^
+  File "/Users/bradsquicciarini/coco/data-archiver/.venv/lib/python3.14/site-packages/shapely/geometry/linestring.py", line 76, in __new__
+    geom = shapely.linestrings(coordinates)
+  File "/Users/bradsquicciarini/coco/data-archiver/.venv/lib/python3.14/site-packages/shapely/decorators.py", line 173, in wrapper
+    result = func(*args, **kwargs)
+  File "/Users/bradsquicciarini/coco/data-archiver/.venv/lib/python3.14/site-packages/shapely/decorators.py", line 88, in wrapped
+    return func(*args, **kwargs)
+  File "/Users/bradsquicciarini/coco/data-archiver/.venv/lib/python3.14/site-packages/shapely/creation.py", line 218, in linestrings
+    return lib.linestrings(coords, np.intc(handle_nan), out=out, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+shapely.errors.GEOSException: IllegalArgumentException: point array must contain 0 or >1 elements
+```
 
 
 
