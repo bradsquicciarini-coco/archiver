@@ -32,8 +32,8 @@ Testing docker locally
   docker run --rm \
     --add-host=host.docker.internal:host-gateway \
     -e AWS_ACCESS_KEY_ID="" \
-    -e AWS_SECRET_ACCESS_KEY=""
-    -e AWS_SESSION_TOKEN=""
+    -e AWS_SECRET_ACCESS_KEY="" \
+    -e AWS_SESSION_TOKEN="" \
     -e AWS_REGION=us-east-1 \
     -e SQS_ENDPOINT_URL=http://host.docker.internal:4566 \
     data-archiver-worker \

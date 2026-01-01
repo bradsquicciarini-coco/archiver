@@ -6,7 +6,6 @@ from typing import Literal
 
 import foxglove
 import yaml
-import cv2
 import numpy as np
 from scipy.spatial.transform import Rotation
 
@@ -14,14 +13,10 @@ from foxglove.channels import FrameTransformsChannel, CameraCalibrationChannel
 from foxglove.schemas import FrameTransform, FrameTransforms, Timestamp, Vector3, Quaternion, CameraCalibration
 
 INPUT_H, INPUT_W = 1080, 1920
-INPUT_WH = (INPUT_W, INPUT_H)
 FOCAL = 790
 # K_d = np.array([[FOCAL, 0, INPUT_W / 2.0], [0, FOCAL, INPUT_H / 2.0], [0, 0, 1]])
 K_d = np.array([[807.327, 0, 978.781], [0, 807.327, 576.948], [0, 0, 1]])
 D = np.array([-0.026, 1.859e-3, 1.131e-4, 7.901e-5])
-
-K_ud = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(K_d, D, INPUT_WH, np.eye(3), balance=0)
-map1, map2 = cv2.fisheye.initUndistortRectifyMap(K_d, D, np.eye(3), K_ud, INPUT_WH, cv2.CV_32F)
 
 # Hardcoded initial guesses
 T_cam2lidar = np.eye(4)
