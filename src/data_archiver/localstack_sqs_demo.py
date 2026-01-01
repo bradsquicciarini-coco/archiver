@@ -5,13 +5,14 @@ import os
 import sys
 
 import boto3
+from tqdm import tqdm
 
 
 def main() -> None:
     sqs = boto3.client(
         "sqs",
-        region_name=os.getenv("AWS_REGION", "us-east-1"),
-        endpoint_url=os.getenv("SQS_ENDPOINT_URL", "http://localhost:4566"),
+        region_name=os.getenv("AWS_REGION", "us-west-2"),
+        # endpoint_url=os.getenv("SQS_ENDPOINT_URL", "http://localhost:4566"),
     )
 
     queue_name = os.getenv("QUEUE_NAME", "localstack-demo-queue")
@@ -20,7 +21,7 @@ def main() -> None:
 
     input_path = sys.argv[1]
     with open(input_path, "r") as f:
-        for line in f:
+        for line in tqdm(f, desc="Sending messages", unit="msg"):
             line = line.strip()
             if not line:
                 continue
@@ -28,9 +29,7 @@ def main() -> None:
             sqs.send_message(
                 QueueUrl=queue_url,
                 MessageBody=json.dumps(payload),
-                MessageAttributes={
-                    "source": {"DataType": "String", "StringValue": "localstack"}
-                },
+                MessageAttributes={"source": {"DataType": "String", "StringValue": "localstack"}},
             )
 
     print(queue_url)
