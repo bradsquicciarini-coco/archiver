@@ -12,7 +12,7 @@ metadata:
   name: data-archiver
   namespace: foxglove
 spec:
-  replicas: 50
+  replicas: 8
   selector:
     matchLabels:
       app: data-archiver
@@ -28,7 +28,7 @@ spec:
         spot: "yes"
       containers:
         - name: data-archiver
-          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver:e079c44
+          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver:00141f9
           imagePullPolicy: IfNotPresent
           volumeMounts:
             - name: tmp
@@ -42,9 +42,11 @@ spec:
             requests:
               cpu: "1000m"
               memory: "1024Mi"
+              ephemeral-storage: "6Gi"
             limits:
               cpu: "1000m"
               memory: "4096Mi"
+              ephemeral-storage: "6Gi"
       volumes:
         - name: tmp
           emptyDir:
