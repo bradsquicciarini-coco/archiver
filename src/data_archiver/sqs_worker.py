@@ -17,6 +17,7 @@ from typing import Any, Dict
 
 import boto3
 import botocore
+import json_log_formatter
 import numpy as np
 from shapely import wkb
 from mcap_ros1.decoder import DecoderFactory as Ros1DecoderFactory
@@ -30,48 +31,12 @@ from data_archiver.utils.overlap import find_best_overlap
 
 logger = logging.getLogger(__name__)
 
-STANDARD_LOG_RECORD_ATTRS = {
-    "args",
-    "asctime",
-    "created",
-    "exc_info",
-    "exc_text",
-    "filename",
-    "funcName",
-    "levelname",
-    "levelno",
-    "lineno",
-    "module",
-    "msecs",
-    "message",
-    "msg",
-    "name",
-    "pathname",
-    "process",
-    "processName",
-    "relativeCreated",
-    "stack_info",
-    "thread",
-    "threadName",
-}
 
-
-class JsonFormatter(logging.Formatter):
-    def format(self, record: logging.LogRecord) -> str:
-        payload = {
-            "timestamp": datetime.utcfromtimestamp(record.created).isoformat() + "Z",
-            "level": record.levelname,
-            "logger": record.name,
-            "message": record.getMessage(),
-        }
-        if record.exc_info:
-            payload["exc_info"] = self.formatException(record.exc_info)
-        if record.stack_info:
-            payload["stack_info"] = self.formatStack(record.stack_info)
-        extras = {key: value for key, value in record.__dict__.items() if key not in STANDARD_LOG_RECORD_ATTRS}
-        if extras:
-            payload["extra"] = extras
-        return json.dumps(payload, default=str)
+class LevelJsonFormatter(json_log_formatter.JSONFormatter):
+    def json_record(self, message: str, extra: dict, record: logging.LogRecord) -> dict:
+        extra["level"] = record.levelname
+        extra["logger"] = record.name
+        return super().json_record(message, extra, record)
 
 
 TOPICS = [
@@ -434,11 +399,13 @@ def process_message(
         #
 
         # ... merge
+        logger.info(f"Merging {len(bag_mcap_files)} into a single one")
         unified_bag_fp = str(tmp_dir / "unifed_bags.mcap")
         merge_mcaps(bag_mcap_files, unified_bag_fp, keep=keep)
         file_index.replace(bag_mcap_files, unified_bag_fp)
 
         # ... pre filter early
+        logger.info("Filter down unifed mcap into only topics we care about")
         unified_bag_filtered_fp = str(tmp_dir / "unifed_bags_filtered.mcap")
         include_str = "".join([f' -y "{t}"   ' for t in TOPICS if "camera_info" not in t and "tf_static" not in t])
         cmd = f"mcap filter {unified_bag_fp} {include_str} -s {int(valid_start_s)} -e {int(valid_end_s)} -o {unified_bag_filtered_fp}"
@@ -461,7 +428,7 @@ def process_message(
         #   2) also compute an envelope to trim the route if we only have partial data for the trip
         should_mask_origin = payload["trip_type"] in ("DELIVERY_TRIP", "RETURN_TRIP")
         should_mask_dest = payload["trip_type"] in ("DELIVERY_TRIP", "RETURN_TRIP", "JITP_TRIP")
-
+        logger.info(f"Determing valid start/end by analyzing trace. {should_mask_origin=} {should_mask_dest=}")
         origin_pt = wkb.loads(bytes.fromhex(payload["origin_point_hexwkb"])) if should_mask_origin else None
         destination_pt = wkb.loads(bytes.fromhex(payload["destination_point_hexwkb"])) if should_mask_dest else None
         geo_valid_start_s, geo_valid_end_s, trace_env = find_valid_start_end_from_trace(unified_bag_filtered_fp, origin_pt, destination_pt)
@@ -489,13 +456,15 @@ def process_message(
         assert len(video_files) > 0, f"no video files found:  {file_index.files}"
         cam_metadata = determine_camera_types(video_files[0])
         aux_vehicle_metadata.update(cam_metadata)
+        logger.info(f"Computed new metadata {aux_vehicle_metadata=}")
 
         # 4. inject any additional data (e.g. routes and map issues)
         # ... map issues
-        if payload.get("map_issues") is not None:
-            map_issue_output = tmp_dir / "map_issues.mcap"
-            write_out_map_issues(map_issue_output, payload["map_issues"])
-            file_index.add(map_issue_output)
+        map_issues = payload.get("map_issues", [])
+        logger.info(f"Adding {len(map_issues)} map issues to the log")
+        map_issue_output = tmp_dir / "map_issues.mcap"
+        write_out_map_issues(map_issue_output, payload["map_issues"])
+        file_index.add(map_issue_output)
 
         # ... inject camera calibration (and tfs?)
         calib_output = tmp_dir / "calibration.mcap"
@@ -504,16 +473,19 @@ def process_message(
 
         # ... routes
         route_output = tmp_dir / "routes.mcap"
+        logger.info(f"Adding {payload['routes']} to the log")
         write_out_routes(route_output, payload["routes"], valid_start_s, origin_pt, destination_pt, envelope=trace_env)
         file_index.add(route_output)
 
         # Combine data into single mcap for the assignment
         # ... merge
+        logger.info("Building final merged file")
         merged_output_fp = str(tmp_dir / "merged.mcap")
         merge_mcaps(file_index.files, merged_output_fp, keep=keep)
 
         # ... filter for specific topics and times
         # filtered_output_fp = str(tmp_dir / "final.mcap")
+        logger.info("Filtering final merged file")
         filtered_output_fp = str(tmp_dir / "final.mcap")
         include_str = "".join([f' -y "{t}"   ' for t in TOPICS])
         cmd = f"mcap filter {merged_output_fp} {include_str} -s {int(valid_start_s)} -e {int(valid_end_s)} -o {filtered_output_fp}"
@@ -626,18 +598,17 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    args = parse_args()
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
-    log_format = os.getenv("LOG_FORMAT", "text").lower()
-    if log_format == "json":
-        handler = logging.StreamHandler()
-        handler.setFormatter(JsonFormatter())
-        logging.basicConfig(level=log_level, handlers=[handler])
-    else:
+    if args.debug:
         logging.basicConfig(
             level=log_level,
             format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         )
-    args = parse_args()
+    else:
+        handler = logging.StreamHandler()
+        handler.setFormatter(LevelJsonFormatter())
+        logging.basicConfig(level=log_level, handlers=[handler])
     if not args.queue_url:
         raise SystemExit("queue URL is required via --queue-url or QUEUE_URL")
     if args.persist_tmp:
