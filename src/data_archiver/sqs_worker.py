@@ -472,10 +472,11 @@ def process_message(
 
         # 4. inject any additional data (e.g. routes and map issues)
         # ... map issues
-        map_issues = payload.get("map_issues", [])
+        map_issues = payload.get("map_issues")
+        map_issues = [] if map_issues is None else map_issues
         logger.info(f"Adding {len(map_issues)} map issues to the log")
         map_issue_output = tmp_dir / "map_issues.mcap"
-        write_out_map_issues(map_issue_output, payload["map_issues"])
+        write_out_map_issues(map_issue_output, map_issues)
         file_index.add(map_issue_output)
 
         # ... inject camera calibration (and tfs?)
