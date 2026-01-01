@@ -10,11 +10,9 @@ import logging
 import os
 from pathlib import Path
 import shutil
-import signal
 import subprocess
 import tempfile
 import time
-import threading
 from typing import Any, Dict
 
 import boto3
@@ -124,51 +122,6 @@ def logged_cmd(cmd: str):
     subprocess.run(cmd, shell=True, check=True)
 
 
-class ShutdownRequested(SystemExit):
-    pass
-
-
-def check_stop(stop_event: threading.Event | None) -> None:
-    if stop_event and stop_event.is_set():
-        raise ShutdownRequested("shutdown requested")
-
-
-def logged_cmd_with_stop(cmd: str, stop_event: threading.Event | None) -> None:
-    if stop_event is None:
-        logged_cmd(cmd)
-        return
-
-    logger.debug(cmd)
-    if os.name == "posix":
-        process = subprocess.Popen(cmd, shell=True, preexec_fn=os.setsid)
-    else:
-        process = subprocess.Popen(cmd, shell=True)
-
-    try:
-        while True:
-            if stop_event.is_set():
-                if os.name == "posix":
-                    os.killpg(process.pid, signal.SIGTERM)
-                else:
-                    process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    if os.name == "posix":
-                        os.killpg(process.pid, signal.SIGKILL)
-                    else:
-                        process.kill()
-                raise ShutdownRequested("shutdown requested")
-            returncode = process.poll()
-            if returncode is not None:
-                if returncode != 0:
-                    raise subprocess.CalledProcessError(returncode, cmd)
-                return
-            time.sleep(0.2)
-    finally:
-        process.wait(timeout=0) if process.poll() is not None else None
-
-
 def get_mcap_timing(filepath: str):
     with open(filepath, "rb") as f:
         reader = make_reader(f)
@@ -272,9 +225,9 @@ def infer_additional_vehicle_metadata(filepath: str):
 
 
 # TODO(Brad): remove after merge
-def merge_mcaps(input_files, output_fp, keep=False, stop_event: threading.Event | None = None):
+def merge_mcaps(input_files, output_fp, keep=False):
     cmd = f'mcap merge {" ".join([str(p) for p in input_files])} -o {output_fp}'
-    logged_cmd_with_stop(cmd, stop_event)
+    logged_cmd(cmd)
     if not keep:
         remove_files(input_files)
 
@@ -288,13 +241,11 @@ def download_logs(
     log_files: list[str],
     output_dir: Path,
     bucket="coco-gg-bags-prod",
-    stop_event: threading.Event | None = None,
 ) -> list[str]:
     """Download the give log files"""
     local_files = []
     logger.info(f"Will download {len(log_files)} files")
     for key in log_files:
-        check_stop(stop_event)
         output_fp = output_dir / key.rsplit("/", 1)[-1]
         local_files.append(str(output_fp))
 
@@ -312,11 +263,10 @@ def download_logs(
     return local_files
 
 
-def convert_bags_to_mcaps(files: list[str], keep_bags=False, stop_event: threading.Event | None = None):
+def convert_bags_to_mcaps(files: list[str], keep_bags=False):
     """Give a list of files it will convert any .bag to .mcap"""
     bag_to_mcap = {}
     for input_fp in files:
-        check_stop(stop_event)
         base_filepath, ext = os.path.splitext(input_fp)
         if ext != ".bag":
             continue
@@ -329,7 +279,7 @@ def convert_bags_to_mcaps(files: list[str], keep_bags=False, stop_event: threadi
             continue
 
         # perform conversion using mcap binary
-        logged_cmd_with_stop(f"mcap convert {input_fp} {output_fp}", stop_event)
+        logged_cmd(f"mcap convert {input_fp} {output_fp}")
 
         # cleanup
         if not keep_bags:
@@ -426,11 +376,8 @@ def process_message(
     base_tmp_dir: Path,
     keep: bool,
     debug: bool,
-    stop_event: threading.Event | None = None,
 ) -> None:
     """Replace this with your real work."""
-
-    check_stop(stop_event)
     local_files = []
     s3 = build_s3_client()
     logger.debug("using tmp_dir=%s", base_tmp_dir)
@@ -468,14 +415,14 @@ def process_message(
         logger.info(f"{overlap_s}s of overlap (lost {og_duration - overlap_s}s)")
 
         # 1. download all logs for a given trip. if any fail we should fail the entire log
-        local_files = download_logs(s3, files_to_download, tmp_dir, stop_event=stop_event)
+        local_files = download_logs(s3, files_to_download, tmp_dir)
         file_index.add(local_files)
 
         # 2. convert any bags to mcap, unify them into one file, and then filter down to topics and time range we care about
         # ... convert
         bag_files = [f for f in local_files if f.endswith(".bag")]
         logger.info(f"Will convert {len(bag_files)} bag files")
-        bag_to_mcap = convert_bags_to_mcaps(bag_files, keep_bags=keep, stop_event=stop_event)
+        bag_to_mcap = convert_bags_to_mcaps(bag_files, keep_bags=keep)
         bag_mcap_files = bag_to_mcap.values()
         file_index.replace(bag_to_mcap.keys(), bag_to_mcap.values())
 
@@ -488,14 +435,14 @@ def process_message(
 
         # ... merge
         unified_bag_fp = str(tmp_dir / "unifed_bags.mcap")
-        merge_mcaps(bag_mcap_files, unified_bag_fp, keep=keep, stop_event=stop_event)
+        merge_mcaps(bag_mcap_files, unified_bag_fp, keep=keep)
         file_index.replace(bag_mcap_files, unified_bag_fp)
 
         # ... pre filter early
         unified_bag_filtered_fp = str(tmp_dir / "unifed_bags_filtered.mcap")
         include_str = "".join([f' -y "{t}"   ' for t in TOPICS if "camera_info" not in t and "tf_static" not in t])
         cmd = f"mcap filter {unified_bag_fp} {include_str} -s {int(valid_start_s)} -e {int(valid_end_s)} -o {unified_bag_filtered_fp}"
-        logged_cmd_with_stop(cmd, stop_event)
+        logged_cmd(cmd)
         file_index.replace([unified_bag_fp], [unified_bag_filtered_fp])
         if not keep:
             remove_files([unified_bag_fp])
@@ -563,14 +510,14 @@ def process_message(
         # Combine data into single mcap for the assignment
         # ... merge
         merged_output_fp = str(tmp_dir / "merged.mcap")
-        merge_mcaps(file_index.files, merged_output_fp, keep=keep, stop_event=stop_event)
+        merge_mcaps(file_index.files, merged_output_fp, keep=keep)
 
         # ... filter for specific topics and times
         # filtered_output_fp = str(tmp_dir / "final.mcap")
         filtered_output_fp = str(tmp_dir / "final.mcap")
         include_str = "".join([f' -y "{t}"   ' for t in TOPICS])
         cmd = f"mcap filter {merged_output_fp} {include_str} -s {int(valid_start_s)} -e {int(valid_end_s)} -o {filtered_output_fp}"
-        logged_cmd_with_stop(cmd, stop_event)
+        logged_cmd(cmd)
         if not keep:
             remove_files([merged_output_fp])
 
@@ -622,15 +569,7 @@ def flatten(d, sep="__", prefix=""):
 
 def poll_loop(queue_url: str, *, max_messages: int, wait_time: int, visibility_timeout: int, once: bool, tmp_dir: Path, keep: bool, debug: bool) -> None:
     sqs = build_sqs_client()
-    stop_event = threading.Event()
-
-    def handle_signal(_signum: int, _frame: Any) -> None:
-        logger.info("shutdown requested (signal=%s)", _signum)
-        stop_event.set()
-
-    signal.signal(signal.SIGINT, handle_signal)
-    signal.signal(signal.SIGTERM, handle_signal)
-    while not stop_event.is_set():
+    while True:
         resp = sqs.receive_message(
             QueueUrl=queue_url,
             MaxNumberOfMessages=max_messages,
@@ -639,8 +578,6 @@ def poll_loop(queue_url: str, *, max_messages: int, wait_time: int, visibility_t
             MessageAttributeNames=["All"],
         )
 
-        if stop_event.is_set():
-            return
         messages = resp.get("Messages", [])
         if not messages:
             if once:
@@ -649,8 +586,6 @@ def poll_loop(queue_url: str, *, max_messages: int, wait_time: int, visibility_t
             continue
 
         for msg in messages:
-            if stop_event.is_set():
-                return
             receipt = msg["ReceiptHandle"]
             try:
                 process_message(
@@ -659,12 +594,8 @@ def poll_loop(queue_url: str, *, max_messages: int, wait_time: int, visibility_t
                     tmp_dir,
                     keep=keep,
                     debug=debug,
-                    stop_event=stop_event,
                 )
                 sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt)
-            except ShutdownRequested:
-                logger.info("shutdown requested during message processing; exiting")
-                return
             except Exception:
                 logger.exception("message processing failed; leaving in queue")
 
