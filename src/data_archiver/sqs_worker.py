@@ -82,9 +82,9 @@ def build_s3_client() -> boto3.client:
     )
 
 
-def logged_cmd(cmd: str):
+def logged_cmd(cmd: str, quiet: bool = False):
     logger.debug(cmd)
-    subprocess.run(cmd, shell=True, check=True)
+    subprocess.run(cmd, shell=True, check=True, stdout=subprocess.DEVNULL if quiet else None)
 
 
 def get_mcap_timing(filepath: str):
@@ -244,7 +244,7 @@ def convert_bags_to_mcaps(files: list[str], keep_bags=False):
             continue
 
         # perform conversion using mcap binary
-        logged_cmd(f"mcap convert {input_fp} {output_fp}")
+        logged_cmd(f"mcap convert {input_fp} {output_fp}", quiet=True)
 
         # cleanup
         if not keep_bags:
