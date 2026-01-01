@@ -45,6 +45,8 @@ TRIP-WORKER
             - [x] create queue
             - [ ] fill sqs queue
       - [ ] infra to run it (spot instances)
+- [ ] document infra (bucket policies etc)
+- [ ] better hsndle disk usagein k8s
 
 Later
 - [ ] how do we want to handle clips that are completely stationary (perhaps add metadata)
