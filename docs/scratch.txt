@@ -39,14 +39,21 @@ TRIP-WORKER
       - [x] add metadata and try and reuse the old trip-clips table
 - [x] check if key exists
 - [x] accept queue url from ENV
+- [x] enable faster shut down of the worker
+- [x] enable json logging that is compatible with datadog
+- [x] pick better servers that have more disk and allow better bin packing
+      - [x] understand disk usage (min/max/avg) by looking at datadog
+            - there are some big boys (e.g. 1000 trips that are longer than an hour). 1 hour of full video would require ~18GB
+            - so lets just set all the requests to 16GB, and limits to 32GB
+      - [x] select instance types that we can best fit on there
+      - [x] update karpenter
 - [ ] deployment
       - [x] dockerfile
+      - [x] infra to run it (spot instances)
       - [ ] queue
             - [x] create queue
             - [ ] fill sqs queue
-      - [ ] infra to run it (spot instances)
 - [ ] document infra (bucket policies etc)
-- [ ] better hsndle disk usagein k8s
 
 Later
 - [ ] how do we want to handle clips that are completely stationary (perhaps add metadata)
