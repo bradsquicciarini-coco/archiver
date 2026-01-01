@@ -553,7 +553,11 @@ def poll_loop(queue_url: str, *, max_messages: int, wait_time: int, visibility_t
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="SQS worker skeleton")
-    parser.add_argument("--queue-url", required=True, help="SQS queue URL")
+    parser.add_argument(
+        "--queue-url",
+        default=os.getenv("QUEUE_URL"),
+        help="SQS queue URL (or set QUEUE_URL)",
+    )
     parser.add_argument("--max-messages", type=int, default=1, help="Messages per poll")
     parser.add_argument("--wait-time", type=int, default=10, help="Long poll wait time (seconds)")
     parser.add_argument("--visibility-timeout", type=int, default=30, help="Visibility timeout (seconds)")
@@ -575,6 +579,8 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     args = parse_args()
+    if not args.queue_url:
+        raise SystemExit("queue URL is required via --queue-url or QUEUE_URL")
     if args.persist_tmp:
         tmp_dir = Path(".tmp") / "data_archiver"
     elif args.tmp_dir:

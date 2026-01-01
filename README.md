@@ -23,7 +23,7 @@ SQS_ENDPOINT_URL=http://localhost:4566 uv run scripts/localstack_sqs_demo.py
 Run the worker (use the printed queue URL):
 
 ```bash
-SQS_ENDPOINT_URL=http://localhost:4566 uv run scripts/sqs_worker.py --queue-url <queue-url>
+SQS_ENDPOINT_URL=http://localhost:4566 QUEUE_URL=<queue-url> uv run scripts/sqs_worker.py
 ```
 
 Testing docker locally
@@ -36,6 +36,7 @@ Testing docker locally
     -e AWS_SESSION_TOKEN="" \
     -e AWS_REGION=us-east-1 \
     -e SQS_ENDPOINT_URL=http://host.docker.internal:4566 \
+    -e QUEUE_URL=<queue url> \
     data-archiver-worker \
-    --queue-url <queue url>
+    --once
 ```

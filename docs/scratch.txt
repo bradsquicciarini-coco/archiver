@@ -38,11 +38,13 @@ TRIP-WORKER
       - [x] name based on assignment_id
       - [x] add metadata and try and reuse the old trip-clips table
 - [x] check if key exists
+- [x] accept queue url from ENV
 - [ ] deployment
-      - [ ] dockerfile
-      - [ ] fill sqs queue
-      - [ ] infra to run it (spot instances) 
-            - could add another node pool that uses spot workers
+      - [x] dockerfile
+      - [ ] queue
+            - [x] create queue
+            - [ ] fill sqs queue
+      - [ ] infra to run it (spot instances)
 
 Later
 - [ ] how do we want to handle clips that are completely stationary (perhaps add metadata)

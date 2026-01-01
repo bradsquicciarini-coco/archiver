@@ -31,6 +31,8 @@ spec:
           env:
             - name: AWS_REGION
               value: us-west-2
+            - name: QUEUE_URL
+              value: https://sqs.us-west-2.amazonaws.com/270582689972/data-archiver-queue
           resources:
             requests:
               cpu: "100m"
