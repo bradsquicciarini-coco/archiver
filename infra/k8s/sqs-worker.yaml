@@ -26,7 +26,7 @@ spec:
         spot: "yes"
       containers:
         - name: data-archiver
-          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver:8a53c3d
+          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver:cf338da
           imagePullPolicy: IfNotPresent
           env:
             - name: AWS_REGION

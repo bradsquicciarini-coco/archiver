@@ -8,7 +8,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY pyproject.toml uv.lock README.md .python-version /app/
-COPY src /app/src
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
@@ -16,7 +15,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxslt1-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --no-install-project
+
+COPY src /app/src
 
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm AS runtime
 
@@ -39,5 +40,7 @@ RUN wget https://github.com/foxglove/mcap/releases/download/releases%2Fmcap-cli%
     mv mcap /usr/local/bin/mcap
 
 COPY --from=builder /app /app
+
+RUN uv sync --frozen --no-dev
 
 ENTRYPOINT ["uv", "run", "--no-sync", "--no-dev", "python", "-m", "data_archiver.sqs_worker"]
