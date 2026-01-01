@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 import json
@@ -30,13 +31,22 @@ from data_archiver.enrich.route import find_valid_start_end_from_trace, write_ou
 from data_archiver.utils.overlap import find_best_overlap
 
 logger = logging.getLogger(__name__)
+pilot_assignment_id_ctx: ContextVar[str | None] = ContextVar("pilot_assignment_id", default=None)
 
 
 class LevelJsonFormatter(json_log_formatter.JSONFormatter):
     def json_record(self, message: str, extra: dict, record: logging.LogRecord) -> dict:
         extra["level"] = record.levelname
         extra["logger"] = record.name
+        extra["pilot_assignment_id"] = getattr(record, "pilot_assignment_id", None)
         return super().json_record(message, extra, record)
+
+
+class PilotAssignmentFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        pilot_assignment_id = pilot_assignment_id_ctx.get()
+        record.pilot_assignment_id = pilot_assignment_id or "-"
+        return True
 
 
 TOPICS = [
@@ -219,7 +229,7 @@ def download_logs(
             continue
 
         s3_uri = f"s3://{bucket}/{key}"
-        logger.info("downloading %s -> %s", s3_uri, output_fp)
+        logger.debug("downloading %s -> %s", s3_uri, output_fp)
 
         try:
             s3_client.download_file(bucket, key, str(output_fp))
@@ -235,7 +245,7 @@ def convert_bags_to_mcaps(files: list[str], keep_bags=False):
         base_filepath, ext = os.path.splitext(input_fp)
         if ext != ".bag":
             continue
-        logger.info(f"Convert {input_fp} to an mcap")
+        logger.debug(f"converting {input_fp} to an mcap")
 
         output_fp = f"{base_filepath}.mcap"
         if os.path.exists(output_fp):
@@ -345,17 +355,19 @@ def process_message(
     """Replace this with your real work."""
     local_files = []
     s3 = build_s3_client()
-    logger.debug("using tmp_dir=%s", base_tmp_dir)
     file_index = FileIndex([])
 
     payload = json.loads(body) if body.strip().startswith("{") else {"body": body}
     pilot_assignment_id = payload.get("pilot_assignment_id")
     trip_type = payload.get("trip_type")
-    logger.info(f"processing {pilot_assignment_id=} {trip_type=} {attributes=}")
-    tmp_dir = base_tmp_dir / pilot_assignment_id
-    tmp_dir.mkdir(exist_ok=True)
-
+    token = pilot_assignment_id_ctx.set(pilot_assignment_id)
+    start_time = time.monotonic()
     try:
+        logger.debug("using tmp_dir=%s", base_tmp_dir)
+        logger.info(f"processing {pilot_assignment_id=} {trip_type=} {attributes=}")
+        tmp_dir = base_tmp_dir / pilot_assignment_id
+        tmp_dir.mkdir(exist_ok=True)
+
         output_bucket = "coco-trip-clips-976053906881-us-west-2"
         start_dt = datetime.fromtimestamp(int(payload["valid_start"]))
         output_key_prefix = f"v2/year={start_dt.year}/month={start_dt.month}/day={start_dt.day}"
@@ -525,10 +537,14 @@ def process_message(
         empty_fp = Path(f"{tmp_dir}/empty.mcap")
         empty_fp.touch()
         s3.upload_file(empty_fp, output_bucket, output_key, ExtraArgs={"Metadata": invalid_metadata})
+        logger.info(f"Processed {pilot_assignment_id}")
+    else:
+        duration_s = time.monotonic() - start_time
+        logger.info(f"Processed {pilot_assignment_id} in {duration_s:.2f}s")
     finally:
         if not keep:
             cleanup(tmp_dir)
-    logger.info(f"Processed {pilot_assignment_id}")
+        pilot_assignment_id_ctx.reset(token)
 
 
 def flatten(d, sep="__", prefix=""):
@@ -600,14 +616,16 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    pilot_filter = PilotAssignmentFilter()
     if args.debug:
-        logging.basicConfig(
-            level=log_level,
-            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        )
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s pilot_assignment_id=%(pilot_assignment_id)s: %(message)s"))
+        handler.addFilter(pilot_filter)
+        logging.basicConfig(level=log_level, handlers=[handler])
     else:
         handler = logging.StreamHandler()
         handler.setFormatter(LevelJsonFormatter())
+        handler.addFilter(pilot_filter)
         logging.basicConfig(level=log_level, handlers=[handler])
     if not args.queue_url:
         raise SystemExit("queue URL is required via --queue-url or QUEUE_URL")
