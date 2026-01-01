@@ -17,6 +17,7 @@ import time
 from typing import Any, Dict
 
 import boto3
+import botocore
 import numpy as np
 from shapely import wkb
 from mcap_ros1.decoder import DecoderFactory as Ros1DecoderFactory
@@ -65,7 +66,7 @@ def build_sqs_client() -> Any:
     )
 
 
-def build_s3_client() -> Any:
+def build_s3_client() -> boto3.client:
     return boto3.client(
         "s3",
         region_name=os.getenv("AWS_REGION", "us-east-1"),
@@ -311,6 +312,16 @@ class GeoFilterError(UnsuitableLogError):
     pass
 
 
+def s3_key_exists(s3, bucket: str, key: str) -> bool:
+    try:
+        s3.head_object(Bucket=bucket, Key=key)
+        return True
+    except botocore.exceptions.ClientError as e:
+        if e.response["Error"]["Code"] == "404":
+            return False
+        raise
+
+
 def process_message(body: str, attributes: Dict[str, Any], base_tmp_dir: Path, keep: bool, debug: bool) -> None:
     """Replace this with your real work."""
 
@@ -327,6 +338,15 @@ def process_message(body: str, attributes: Dict[str, Any], base_tmp_dir: Path, k
     tmp_dir.mkdir(exist_ok=True)
 
     try:
+        output_bucket = "coco-trip-clips-976053906881-us-west-2"
+        start_dt = datetime.fromtimestamp(int(payload["valid_start"]))
+        output_key_prefix = f"v2/year={start_dt.year}/month={start_dt.month}/day={start_dt.day}"
+        output_key = f"{output_key_prefix}/{pilot_assignment_id}.mcap"
+        exists = s3_key_exists(s3, output_bucket, output_key)
+        if exists:
+            logger.info(f"s3://{output_bucket}/{output_key} exists will not process")
+            return
+
         # 0. find best overlap
         interval, bag_files, video_files = find_best_overlap(payload["log_files"])
         assert interval is not None, "No overlap in logs"
@@ -451,6 +471,7 @@ def process_message(body: str, attributes: Dict[str, Any], base_tmp_dir: Path, k
         # ... check for existance of /point_one/pose
         # ... check resolution of left/front/right cameras
         existing_metadata = payload.get("external_metadata")
+        existing_metadata["__version"] = 2
         start_s, end_s, duration_s = get_mcap_timing(filtered_output_fp)
         existing_metadata["clip_start_utc"] = datetime.fromtimestamp(start_s).isoformat() + "Z"
         existing_metadata["clip_end_utc"] = datetime.fromtimestamp(end_s).isoformat() + "Z"
@@ -462,14 +483,34 @@ def process_message(body: str, attributes: Dict[str, Any], base_tmp_dir: Path, k
         # 6. quality check
         # ... check that all topics are there
         # TODO(Brad): do this
+
+        # 7. upload
+        flattened_metadata = flatten(existing_metadata)
+        logger.info(f"Uploading to s3://{output_bucket}/{output_key} with metadata: {flattened_metadata}")
+        s3.upload_file(filtered_output_fp, output_bucket, output_key, ExtraArgs={"Metadata": flattened_metadata})
+
+        # TODO(Brad): do this
         if debug:
             shutil.move(filtered_output_fp, base_tmp_dir / "final.mcap")
+
     except NoValidDataError as e:
-        logger.warning(f"No valid data found. Will consume message from queue: {e}")
+        logger.warning(f"No valid data found. Will place marker in s3 and will consume message from queue: {e}")
+        invalid_metadata = {"__version": "2", "error_code": "NO_VALID_DATA"}
+        empty_fp = Path(f"{tmp_dir}/empty.mcap")
+        empty_fp.touch()
+        s3.upload_file(empty_fp, output_bucket, output_key, ExtraArgs={"Metadata": invalid_metadata})
     finally:
         if not keep:
             cleanup(tmp_dir)
     logger.info(f"Processed {pilot_assignment_id}")
+
+
+def flatten(d, sep="__", prefix=""):
+    out = {}
+    for k, v in d.items():
+        key = f"{prefix}{sep}{k}" if prefix else k
+        out.update(flatten(v, sep, key) if isinstance(v, dict) else {key: str(v)})
+    return out
 
 
 def poll_loop(queue_url: str, *, max_messages: int, wait_time: int, visibility_timeout: int, once: bool, tmp_dir: Path, keep: bool, debug: bool) -> None:

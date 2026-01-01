@@ -34,9 +34,10 @@ TRIP-WORKER
 - [x] no clean up during failure
 - [x] don't clip Deployment trips
 - [x] handle retryable errors and non-retryable errors
-- [ ] upload to s3
-      - [ ] name based on assignment_id
-      - [ ] add metadata and try and reuse the old trip-clips table
+- [x] upload to s3
+      - [x] name based on assignment_id
+      - [x] add metadata and try and reuse the old trip-clips table
+- [x] check if key exists
 - [ ] deployment
       - [ ] dockerfile
       - [ ] fill sqs queue
