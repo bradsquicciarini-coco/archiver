@@ -394,7 +394,7 @@ def process_message(
         exists = s3_key_exists(s3, output_bucket, output_key)
         if exists:
             logger.info(f"s3://{output_bucket}/{output_key} exists will not process")
-            # return
+            return
 
         # 0. find best overlap
         interval, bag_files, video_files = find_best_overlap(payload["log_files"])
