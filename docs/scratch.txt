@@ -47,12 +47,12 @@ TRIP-WORKER
             - so lets just set all the requests to 16GB, and limits to 32GB
       - [x] select instance types that we can best fit on there
       - [x] update karpenter
-- [ ] deployment
+- [x] deployment
       - [x] dockerfile
       - [x] infra to run it (spot instances)
-      - [ ] queue
+      - [x] queue
             - [x] create queue
-            - [ ] fill sqs queue
+            - [x] fill sqs queue
 - [ ] document infra (bucket policies etc)
 
 Later
@@ -78,13 +78,6 @@ WORKER (can we do this in go? will make scheduling workers easier)
 - upload to s3 (double check intermediate results cost)
   - if we reuse trip clips we'll be able to use the s3 tables for organizing the upload
   - AND for downloading clips we care about (outside of open ai thing)
-
-TAR BUILDER
------------
-- Build up 100GB chunks and send tar over
-
-
-Q: Do we want to split into segments? honestly i think this will just make our lives harder
 
 
 CODE CLEANUP
@@ -118,20 +111,16 @@ METADATA
 | vehicle.gps_version      | 1 /2                                           | <FILE>                |
 
 
-PROBLEMS
---------------
-Q: some clips have non contiguous video. in ordee to maximize data, we would need to use the 
-smalles unit of the fragments so this would be 1 minute. we also need to decide if we wany to send 
-them full clips or 1 minute chunks
+TAR BUILDER
+-----------
+- Build up 100GB chunks and store in s3
+- use az copy to copy it over 
+- things we want
+  - good pilots
+  - new hw
+  - city (?)
+  - split up by this and tar them together so we can pull down data we want
 
-I think we can kill two birds with one stone give most samples have contiguous chunks
-- only take samples that have > 90% video coverage
-- take the largest contiguous block
-- then we'll just send them trips
+Q: Do we want to split into segments? honestly i think this will just make our lives harder
 
-Q: Should we 
-  1. prefilter trips and stick them in s3. then we can just pull from s3 and ship it or...
-  2. compute metadata for when to clip the trip then do it during tarring
 
-  #1 puts the complexity before its in s3, but we lose some data and won't have any parking data
-  #2 would require some work during tarring but would give us some parking data
