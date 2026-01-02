@@ -94,7 +94,7 @@ def build_s3_client() -> boto3.client:
 
 def logged_cmd(cmd: str, quiet: bool = False):
     logger.debug(cmd)
-    subprocess.run(cmd, shell=True, check=True, stdout=subprocess.DEVNULL if quiet else None)
+    subprocess.run(cmd, shell=True, check=True, stdout=subprocess.DEVNULL if quiet else None, stderr=subprocess.DEVNULL if quiet else None)
 
 
 def get_mcap_timing(filepath: str):
@@ -265,11 +265,6 @@ def convert_bags_to_mcaps(files: list[str], keep_bags=False):
 
 
 @dataclass
-class LocalFile:
-    fp: str
-
-
-@dataclass
 class FileIndex:
     files: list[str]
 
@@ -328,10 +323,6 @@ class UnsuitableLogError(RuntimeError):
 
 
 class NoValidDataError(UnsuitableLogError):
-    pass
-
-
-class GeoFilterError(UnsuitableLogError):
     pass
 
 
@@ -403,28 +394,11 @@ def process_message(
         bag_mcap_files = bag_to_mcap.values()
         file_index.replace(bag_to_mcap.keys(), bag_to_mcap.values())
 
-        # by this point we should have a temporary directory with the following structure:
-        # <tmp>
-        #    <name0>.mcap
-        #    ......
-        #    <nameN>.mcap
-        #
-
-        # ... merge
+        # ... merge them into single file
         logger.info(f"Merging {len(bag_mcap_files)} into a single one")
         unified_bag_fp = str(tmp_dir / "unifed_bags.mcap")
         merge_mcaps(bag_mcap_files, unified_bag_fp, keep=keep)
         file_index.replace(bag_mcap_files, unified_bag_fp)
-
-        # ... pre filter early
-        logger.info("Filter down unifed mcap into only topics we care about")
-        unified_bag_filtered_fp = str(tmp_dir / "unifed_bags_filtered.mcap")
-        include_str = "".join([f' -y "{t}"   ' for t in TOPICS if "camera_info" not in t and "tf_static" not in t])
-        cmd = f"mcap filter {unified_bag_fp} {include_str} -s {int(valid_start_s)} -e {int(valid_end_s)} -o {unified_bag_filtered_fp}"
-        logged_cmd(cmd)
-        file_index.replace([unified_bag_fp], [unified_bag_filtered_fp])
-        if not keep:
-            remove_files([unified_bag_fp])
 
         # directory now looks like this
         # <tmp>
@@ -443,7 +417,14 @@ def process_message(
         logger.info(f"Determing valid start/end by analyzing trace. {should_mask_origin=} {should_mask_dest=}")
         origin_pt = wkb.loads(bytes.fromhex(payload["origin_point_hexwkb"])) if should_mask_origin else None
         destination_pt = wkb.loads(bytes.fromhex(payload["destination_point_hexwkb"])) if should_mask_dest else None
-        geo_valid_start_s, geo_valid_end_s, trace_env = find_valid_start_end_from_trace(unified_bag_filtered_fp, origin_pt, destination_pt)
+        geo_valid_start_s, geo_valid_end_s, trace_env = find_valid_start_end_from_trace(
+            unified_bag_fp,
+            origin_pt,
+            destination_pt,
+            start_ns=int(valid_start_s * 1e9),
+            end_ns=int(valid_end_s * 1e9),
+            frequency_hz=0.5,
+        )
         if geo_valid_start_s is None:
             raise NoValidDataError("no valid start found based on trace")
         if geo_valid_end_s is None:
@@ -462,7 +443,7 @@ def process_message(
 
         # compute some additional metadata (will need for injecting calibration)
         aux_vehicle_metadata = {}
-        gps_version = determine_gps_type(unified_bag_filtered_fp)
+        gps_version = determine_gps_type(unified_bag_fp)
         aux_vehicle_metadata["gps_version"] = gps_version
         video_files = [f for f in file_index.files if f.endswith("h264.mcap")]
         assert len(video_files) > 0, f"no video files found:  {file_index.files}"
@@ -622,12 +603,14 @@ def main() -> int:
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s pilot_assignment_id=%(pilot_assignment_id)s: %(message)s"))
         handler.addFilter(pilot_filter)
-        logging.basicConfig(level=log_level, handlers=[handler])
+        logging.basicConfig(handlers=[handler])
+        logger.setLevel(log_level)
     else:
         handler = logging.StreamHandler()
         handler.setFormatter(LevelJsonFormatter())
         handler.addFilter(pilot_filter)
-        logging.basicConfig(level=log_level, handlers=[handler])
+        logging.basicConfig(handlers=[handler])
+        logger.setLevel(log_level)
     if not args.queue_url:
         raise SystemExit("queue URL is required via --queue-url or QUEUE_URL")
     if args.persist_tmp:

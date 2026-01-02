@@ -116,6 +116,8 @@ def find_valid_start_end_from_trace(
     frequency_hz: float = 1.0,
     radius_m: float = 50.0,
     buffer_m: float = 50.0,
+    start_ns=None,
+    end_ns=None,
 ) -> Tuple[Optional[float], Optional[float], Optional[any]]:
     period = 1.0 / max(float(frequency_hz), 1e-9)
     pts = []
@@ -131,7 +133,7 @@ def find_valid_start_end_from_trace(
 
     with open(filepath, "rb") as f:
         reader = make_reader(f, decoder_factories=[Ros1DecoderFactory(), ProtobufDecoderFactory()])
-        for _, _, msg, dmsg in reader.iter_decoded_messages(topics=["/acu_driver/gps_nav_topic"]):
+        for _, _, msg, dmsg in reader.iter_decoded_messages(topics=["/acu_driver/gps_nav_topic"], start_time=start_ns, end_time=end_ns):
             t = msg.log_time / 1e9
             if t - last_t < period:
                 continue
