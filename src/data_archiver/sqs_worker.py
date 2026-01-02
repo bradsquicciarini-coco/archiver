@@ -28,7 +28,7 @@ from mcap.reader import make_reader
 from data_archiver.enrich.camera_calibration import write_out_camera_calibration
 from data_archiver.enrich.map_issue import write_out_map_issues
 from data_archiver.enrich.route import find_valid_start_end_from_trace, write_out_geo_debug, write_out_routes
-from data_archiver.utils.overlap import find_best_overlap
+from data_archiver.utils.overlap import find_best_overlap, parse_timestamp_from_mcap
 
 logger = logging.getLogger(__name__)
 pilot_assignment_id_ctx: ContextVar[str | None] = ContextVar("pilot_assignment_id", default=None)
@@ -207,6 +207,34 @@ def merge_mcaps(input_files, output_fp, keep=False):
         remove_files(input_files)
 
 
+def trim_video_files(video_files, valid_start_s, valid_end_s, tmp_dir, keep=False, chunk_duration_s=60.0):
+    if not video_files:
+        return []
+
+    trimmed_files = []
+    for video_fp in sorted(video_files, key=parse_timestamp_from_mcap):
+        file_start_s = parse_timestamp_from_mcap(video_fp)
+        file_end_s = file_start_s + chunk_duration_s
+        trim_start_s = max(valid_start_s, file_start_s)
+        trim_end_s = min(valid_end_s, file_end_s)
+
+        if trim_start_s >= trim_end_s:
+            continue
+
+        if trim_start_s == file_start_s and trim_end_s == file_end_s:
+            trimmed_files.append(video_fp)
+            continue
+
+        output_fp = str(tmp_dir / f"{Path(video_fp).stem}_trimmed.mcap")
+        cmd = f"mcap filter {video_fp} -s {int(trim_start_s)} -e {int(trim_end_s)} -o {output_fp}"
+        logged_cmd(cmd)
+        trimmed_files.append(output_fp)
+        if not keep:
+            remove_files([video_fp])
+
+    return trimmed_files
+
+
 class LogDownloadError(RuntimeError):
     pass
 
@@ -366,7 +394,7 @@ def process_message(
         exists = s3_key_exists(s3, output_bucket, output_key)
         if exists:
             logger.info(f"s3://{output_bucket}/{output_key} exists will not process")
-            return
+            # return
 
         # 0. find best overlap
         interval, bag_files, video_files = find_best_overlap(payload["log_files"])
@@ -402,7 +430,7 @@ def process_message(
 
         # directory now looks like this
         # <tmp>
-        #   unifed_bags_filtered.mcap
+        #   unifed_bags.mcap
         #   <prefix0>_h264.mcap
         #   ...
         #   <prefixN>_h264.mcap
@@ -471,21 +499,32 @@ def process_message(
         write_out_routes(route_output, payload["routes"], valid_start_s, origin_pt, destination_pt, envelope=trace_env)
         file_index.add(route_output)
 
+        non_video_files = [f for f in file_index.files if not f.endswith("h264.mcap")]
+        logger.info("Building merged non-video file")
+        merged_non_video_fp = str(tmp_dir / "merged_non_video.mcap")
+        merge_mcaps(non_video_files, merged_non_video_fp, keep=keep)
+
+        logger.info("Filtering merged non-video file")
+        filtered_non_video_fp = str(tmp_dir / "filtered_non_video.mcap")
+        include_str = "".join([f' -y "{t}"   ' for t in TOPICS])
+        cmd = f"mcap filter {merged_non_video_fp} {include_str} -s {int(valid_start_s)} -e {int(valid_end_s)} -o {filtered_non_video_fp}"
+        logged_cmd(cmd)
+        if not keep:
+            remove_files([merged_non_video_fp])
+        file_index.replace(non_video_files, filtered_non_video_fp)
+
+        video_files = [f for f in file_index.files if f.endswith("h264.mcap")]
+        trimmed_video_files = trim_video_files(video_files, valid_start_s, valid_end_s, tmp_dir, keep=keep)
+        if video_files:
+            file_index.replace(video_files, trimmed_video_files)
+        if video_files and not trimmed_video_files:
+            logger.warning("No video files intersected the valid range after trimming")
+
         # Combine data into single mcap for the assignment
         # ... merge
         logger.info("Building final merged file")
-        merged_output_fp = str(tmp_dir / "merged.mcap")
-        merge_mcaps(file_index.files, merged_output_fp, keep=keep)
-
-        # ... filter for specific topics and times
-        # filtered_output_fp = str(tmp_dir / "final.mcap")
-        logger.info("Filtering final merged file")
         filtered_output_fp = str(tmp_dir / "final.mcap")
-        include_str = "".join([f' -y "{t}"   ' for t in TOPICS])
-        cmd = f"mcap filter {merged_output_fp} {include_str} -s {int(valid_start_s)} -e {int(valid_end_s)} -o {filtered_output_fp}"
-        logged_cmd(cmd)
-        if not keep:
-            remove_files([merged_output_fp])
+        merge_mcaps(file_index.files, filtered_output_fp, keep=keep)
 
         # 5. infer additional metadata
         # ... check for existance of /point_one/pose
