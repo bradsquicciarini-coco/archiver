@@ -12,7 +12,7 @@ metadata:
   name: data-archiver
   namespace: foxglove
 spec:
-  replicas: 512
+  replicas: 128 
   selector:
     matchLabels:
       app: data-archiver
@@ -25,11 +25,11 @@ spec:
     spec:
       serviceAccountName: data-archiver
       nodeSelector:
-        disk: "200gb"
+        disk: "instance-store"
         karpenter.sh/capacity-type: spot
       containers:
         - name: data-archiver
-          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver:3b25b78
+          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver:09a64e0
           imagePullPolicy: IfNotPresent
           volumeMounts:
             - name: tmp
