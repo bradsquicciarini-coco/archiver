@@ -621,7 +621,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--max-messages", type=int, default=1, help="Messages per poll")
     parser.add_argument("--wait-time", type=int, default=10, help="Long poll wait time (seconds)")
-    parser.add_argument("--visibility-timeout", type=int, default=30, help="Visibility timeout (seconds)")
+    parser.add_argument("--visibility-timeout", type=int, default=3600, help="Visibility timeout (seconds)")
     parser.add_argument("--once", action="store_true", help="Process a single poll and exit")
     parser.add_argument("--keep", action="store_true")
     parser.add_argument("--debug", action="store_true")
