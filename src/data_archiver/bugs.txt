@@ -1,0 +1,2 @@
+id: b47c88eb-1a17-4377-8596-f193586bce25
+bug: Merge failure: error on input on /tmp/b47c88eb-1a17-4377-8596-f193586bce25/prod_C10514_2025-01-15-18-16-48_h264.mcap: MCAP truncated in message index (0x7) record content with expected length 1286, data ended after 1000 bytes

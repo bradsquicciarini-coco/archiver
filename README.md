@@ -40,3 +40,10 @@ Testing docker locally
     data-archiver-worker \
     --once
 ```
+
+### k8s
+
+to scale from cli
+```bash
+kubectl scale deployment data-archiver --replicas=128 -n foxglove
+```

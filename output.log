@@ -1,0 +1,169 @@
+== Context ==
+Region: us-west-2
+VPC:    vpc-0a3eb62e4444089a7
+
+== VPC CIDRs ==
+------------------
+|  DescribeVpcs  |
++----------------+
+|  10.10.0.0/16  |
++----------------+
+
+== Subnets in VPC (CIDR, AZ, ID) ==
+--------------------------------------------------------------
+|                       DescribeSubnets                      |
++------------+------------------+----------------------------+
+|     AZ     |      CIDR        |         SubnetId           |
++------------+------------------+----------------------------+
+|  us-west-2a|  10.10.40.0/22   |  subnet-0512016b0fbfb8313  |
+|  us-west-2b|  10.10.24.0/22   |  subnet-0c04ed6813ae85dd7  |
+|  us-west-2c|  10.10.112.0/20  |  subnet-04dadc90ab2b47193  |
+|  us-west-2c|  10.10.48.0/22   |  subnet-0fcaf05ffe3030622  |
+|  us-west-2a|  10.10.200.0/24  |  subnet-0d209ee11a98e8495  |
+|  us-west-2c|  10.10.8.0/22    |  subnet-06fe9fef7a21c895e  |
+|  us-west-2a|  10.10.20.0/22   |  subnet-040acc9dc17cb16ed  |
+|  us-west-2c|  10.10.202.0/24  |  subnet-06edc4864732e3c7e  |
+|  us-west-2c|  10.10.102.0/24  |  subnet-05ce9846d606b5f37  |
+|  us-west-2a|  10.10.0.0/22    |  subnet-088d6c011054e2233  |
+|  us-west-2c|  10.10.28.0/22   |  subnet-080f801e9dc3656fb  |
+|  us-west-2b|  10.10.44.0/22   |  subnet-0569fb8d13f7eb918  |
+|  us-west-2a|  10.10.100.0/24  |  subnet-078485019d57cf150  |
+|  us-west-2a|  10.10.64.0/20   |  subnet-0c26d7a01e8ce44c8  |
+|  us-west-2b|  10.10.201.0/24  |  subnet-0db0dc5ffb45dd5c1  |
+|  us-west-2b|  10.10.80.0/20   |  subnet-07d826f858ecc9942  |
+|  us-west-2b|  10.10.4.0/22    |  subnet-01aefad12057725aa  |
+|  us-west-2b|  10.10.101.0/24  |  subnet-02d82df1b3845f90c  |
++------------+------------------+----------------------------+
+
+== Main route table ==
+Main RTB: rtb-07e1bab82ce9edde9
+---------------------------------------------------------------------
+|                        DescribeRouteTables                        |
++-----------------------+------------+--------------------+---------+
+| DestinationCidrBlock  | GatewayId  |      Origin        |  State  |
++-----------------------+------------+--------------------+---------+
+|  10.10.0.0/16         |  local     |  CreateRouteTable  |  active |
++-----------------------+------------+--------------------+---------+
+
+== Route tables with default route (0.0.0.0/0) ==
+----------------------------------------------------
+|                DescribeRouteTables               |
++------------------------+-------------------------+
+|        DefaultGW       |           RTB           |
++------------------------+-------------------------+
+|  None                  |  rtb-0f6016c0a068dbad8  |
+|  None                  |  rtb-0128c6e32eb48cebb  |
+|  igw-0c01dbcaf5c364858 |  rtb-0acaf1adf3c94c7aa  |
+|  None                  |  rtb-0868db1c7962b8e4b  |
++------------------------+-------------------------+
+
+== NAT Gateways (if any) ==
+------------------------------------------------------------------------------------
+|                                DescribeNatGateways                               |
++------------------------+---------------+------------+----------------------------+
+|          NatId         |   PublicIp    |   State    |          Subnet            |
++------------------------+---------------+------------+----------------------------+
+|  nat-0c4b44591b83d79be |  52.43.0.154  |  available |  subnet-02d82df1b3845f90c  |
+|  nat-0f641c4203f3b6332 |  44.229.52.70 |  available |  subnet-05ce9846d606b5f37  |
+|  nat-02161d61f30d99b12 |  44.234.37.83 |  available |  subnet-078485019d57cf150  |
++------------------------+---------------+------------+----------------------------+
+
+== IGWs attached (if any) ==
+---------------------------
+|DescribeInternetGateways |
++-------------------------+
+|  igw-0c01dbcaf5c364858  |
++-------------------------+
+
+== VPC Endpoints (key services) ==
+-------------------------------------------------------------------
+|                      DescribeVpcEndpoints                       |
++--------------------------------------+------------+-------------+
+|                Service               |   State    |    Type     |
++--------------------------------------+------------+-------------+
+|  com.amazonaws.us-west-2.ssmmessages |  available |  Interface  |
+|  com.amazonaws.us-west-2.ssm         |  available |  Interface  |
+|  com.amazonaws.us-west-2.ec2messages |  available |  Interface  |
+|  com.amazonaws.us-west-2.s3          |  available |  Gateway    |
+|  com.amazonaws.us-west-2.dynamodb    |  available |  Gateway    |
++--------------------------------------+------------+-------------+
+
+== Endpoint presence checks (available endpoints) ==
+ECR API (com.amazonaws.us-west-2.ecr.api): 0
+ECR DKR (com.amazonaws.us-west-2.ecr.dkr): 0
+STS     (com.amazonaws.us-west-2.sts):     0
+S3      (com.amazonaws.us-west-2.s3):      1   (S3 is usually a *Gateway* endpoint)
+
+== Target subnet routing diagnostics ==
+Subnet: subnet-06edc4864732e3c7e  AZ: us-west-2c  CIDR: 10.10.202.0/24
+  RouteTable: rtb-08afc71d31e6d2775  (main if no explicit association)
+  Default route (0.0.0.0/0): NONE
+  Risk: instances need VPC endpoints (ECR+S3+STS) to bootstrap/pull images; otherwise they will fail.
+
+Subnet: subnet-0db0dc5ffb45dd5c1  AZ: us-west-2b  CIDR: 10.10.201.0/24
+  RouteTable: rtb-08afc71d31e6d2775  (main if no explicit association)
+  Default route (0.0.0.0/0): NONE
+  Risk: instances need VPC endpoints (ECR+S3+STS) to bootstrap/pull images; otherwise they will fail.
+
+Subnet: subnet-0d209ee11a98e8495  AZ: us-west-2a  CIDR: 10.10.200.0/24
+  RouteTable: rtb-08afc71d31e6d2775  (main if no explicit association)
+  Default route (0.0.0.0/0): NONE
+  Risk: instances need VPC endpoints (ECR+S3+STS) to bootstrap/pull images; otherwise they will fail.
+
+== Kubernetes nodes (optional) ==
+Found kubectl. Checking a few nodes to see what subnets they actually use...
+
+Node: ip-10-10-0-183.us-west-2.compute.internal
+  ProviderID: aws:///us-west-2a/i-08fbc4e845fb90df5
+  Instance:   i-08fbc4e845fb90df5
+  Subnet:     subnet-088d6c011054e2233
+Subnet: subnet-088d6c011054e2233  AZ: us-west-2a  CIDR: 10.10.0.0/22
+  RouteTable: rtb-0f6016c0a068dbad8  (main if no explicit association)
+  Default route (0.0.0.0/0): NONE
+  Risk: instances need VPC endpoints (ECR+S3+STS) to bootstrap/pull images; otherwise they will fail.
+
+
+Node: ip-10-10-10-106.us-west-2.compute.internal
+  ProviderID: aws:///us-west-2c/i-08be21ee777349c98
+  Instance:   i-08be21ee777349c98
+  Subnet:     subnet-06fe9fef7a21c895e
+Subnet: subnet-06fe9fef7a21c895e  AZ: us-west-2c  CIDR: 10.10.8.0/22
+  RouteTable: rtb-0868db1c7962b8e4b  (main if no explicit association)
+  Default route (0.0.0.0/0): NONE
+  Risk: instances need VPC endpoints (ECR+S3+STS) to bootstrap/pull images; otherwise they will fail.
+
+
+Node: ip-10-10-10-15.us-west-2.compute.internal
+  ProviderID: aws:///us-west-2c/i-0576fbd27f702f986
+  Instance:   i-0576fbd27f702f986
+  Subnet:     subnet-06fe9fef7a21c895e
+Subnet: subnet-06fe9fef7a21c895e  AZ: us-west-2c  CIDR: 10.10.8.0/22
+  RouteTable: rtb-0868db1c7962b8e4b  (main if no explicit association)
+  Default route (0.0.0.0/0): NONE
+  Risk: instances need VPC endpoints (ECR+S3+STS) to bootstrap/pull images; otherwise they will fail.
+
+
+Node: ip-10-10-10-153.us-west-2.compute.internal
+  ProviderID: aws:///us-west-2c/i-0132b33c29945fbd3
+  Instance:   i-0132b33c29945fbd3
+  Subnet:     subnet-06fe9fef7a21c895e
+Subnet: subnet-06fe9fef7a21c895e  AZ: us-west-2c  CIDR: 10.10.8.0/22
+  RouteTable: rtb-0868db1c7962b8e4b  (main if no explicit association)
+  Default route (0.0.0.0/0): NONE
+  Risk: instances need VPC endpoints (ECR+S3+STS) to bootstrap/pull images; otherwise they will fail.
+
+
+Node: ip-10-10-10-189.us-west-2.compute.internal
+  ProviderID: aws:///us-west-2c/i-0896cc37f731433bd
+  Instance:   i-0896cc37f731433bd
+  Subnet:     subnet-06fe9fef7a21c895e
+Subnet: subnet-06fe9fef7a21c895e  AZ: us-west-2c  CIDR: 10.10.8.0/22
+  RouteTable: rtb-0868db1c7962b8e4b  (main if no explicit association)
+  Default route (0.0.0.0/0): NONE
+  Risk: instances need VPC endpoints (ECR+S3+STS) to bootstrap/pull images; otherwise they will fail.
+
+== Summary guidance ==
+- If a subnet has NO default route, nodes in it will only bootstrap reliably if you have VPC endpoints for ECR API, ECR DKR, S3, and STS.
+- If you intend these to be private worker subnets, you usually want 0.0.0.0/0 -> nat-... in the associated route table.
+- Your earlier output showed the *main* route table has only the local route; so new subnets that inherit it will not have egress.
+Done.

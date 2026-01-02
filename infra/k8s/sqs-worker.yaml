@@ -12,7 +12,7 @@ metadata:
   name: data-archiver
   namespace: foxglove
 spec:
-  replicas: 32
+  replicas: 512
   selector:
     matchLabels:
       app: data-archiver
@@ -41,7 +41,7 @@ spec:
               value: https://sqs.us-west-2.amazonaws.com/270582689972/data-archiver-queue
           resources:
             requests:
-              cpu: "1000m"
+              cpu: "500m"
               memory: "1024Mi"
               ephemeral-storage: "8Gi"
             limits:
