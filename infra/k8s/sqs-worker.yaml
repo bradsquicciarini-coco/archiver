@@ -12,7 +12,7 @@ metadata:
   name: data-archiver
   namespace: foxglove
 spec:
-  replicas: 128 
+  replicas: 800 
   selector:
     matchLabels:
       app: data-archiver
@@ -29,7 +29,7 @@ spec:
         karpenter.sh/capacity-type: spot
       containers:
         - name: data-archiver
-          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver:09a64e0
+          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver:4a3958b
           imagePullPolicy: IfNotPresent
           volumeMounts:
             - name: tmp

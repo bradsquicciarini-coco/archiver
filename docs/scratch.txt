@@ -1,21 +1,4 @@
 TODO
------------
-... data
-- [x] get all metadata for each assignment (download from redshift)
-- [x] get route for each trip
-- [x] get map issues for each
-
-
-- [x] [HMMMMMMM] clip the start and end (might put us under :/) (going to use chunks for this) [CHECK WE HAVE ENOUGH DATA]
-OR
-- [ ] package up into trips
-
-- [ ] package into a message consumable by SQS (think we can just dump as json)
-- [ ]... worker
-- [ ] find some more data
-
-
-TRIP-WORKER
 ---------------
 - [x] pull a message off the queue
 - [x] download all logs for a given trip
@@ -59,32 +42,6 @@ Later
 - [ ] how do we want to handle clips that are completely stationary (perhaps add metadata)
 
 
-QUEUE
-------------
-  build one message per assignment
-
-if we can keep the payload under 1 Mib, we just put everything required in the SQS message
-
-
-WORKER (can we do this in go? will make scheduling workers easier)
-----------
-- pull a message off the queue
-- download all logs for a given trip
-- convert any bags to mcaps
-- inject additional data (route + map issues) as protobufs
-  - need to clip route
-- merge into unified mcap for the trip
-- [maybe] store metadata on the mcap file (and then the tar builder can create their json)
-- upload to s3 (double check intermediate results cost)
-  - if we reuse trip clips we'll be able to use the s3 tables for organizing the upload
-  - AND for downloading clips we care about (outside of open ai thing)
-
-
-CODE CLEANUP
--------------
-
-
-
 METADATA
 ----------
 
@@ -113,6 +70,24 @@ METADATA
 
 TAR BUILDER
 -----------
+
+| s3://coco-trip-clips-976053906881-us-west-2/v2 | ----- [tar server ] -----> | s3://coco-trip-clips-976053906881-us-west-2/tar/|
+
+- [ ] get another 10k hours of data :/
+- [ ] design segmentation of trips (e.g. by hardware, city, pilots)
+- [ ] create segmentation of trips
+- [ ] bin pack into tar files
+- [ ] design shape of tar file (e.g. manifest? metadata? etc?)
+- [ ] create worker to pull down keys and package up into tar files
+
+
+| cam   | gb/hour (avg) |
+|-------|---------------|
+| 1     |      2.414577 |
+| 1.5-1 |      4.303630 |
+| 1.5-3 |      8.435155 |
+
+
 - Build up 100GB chunks and store in s3
 - use az copy to copy it over 
 - things we want

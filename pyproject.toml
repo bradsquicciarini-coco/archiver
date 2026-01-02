@@ -23,6 +23,7 @@ dependencies = [
 dev = [
     "grpcio-tools>=1.76.0",
     "ipykernel>=7.1.0",
+    "matplotlib>=3.10.8",
     "pandas>=2.3.3",
     "pyarrow>=22.0.0",
     "redshift-connector[full]>=2.1.10",
