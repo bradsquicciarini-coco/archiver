@@ -1,0 +1,45 @@
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src \
+    UV_PYTHON=python3.12
+
+WORKDIR /app
+
+COPY pyproject.toml uv.lock README.md .python-version /app/
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        libxml2-dev \
+        libxslt1-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN uv sync --frozen --no-dev --no-install-project
+
+COPY src /app/src
+
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src \
+    PATH=/app/.venv/bin:$PATH \
+    UV_PYTHON=python3.12 \
+    UV_NO_SYNC=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libxml2 \
+        libxslt1.1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY go/mcap-filter /usr/local/bin/mcap-filter
+RUN chmod +x /usr/local/bin/mcap-filter
+
+COPY --from=builder /app /app
+
+RUN uv sync --frozen --no-dev
+
+ENTRYPOINT ["uv", "run", "--no-sync", "--no-dev", "python", "-m", "data_archiver.sqs_worker"]

@@ -12,3 +12,5 @@ wheels/
 data
 .tmp
 notebooks
+go/go.sum
+go/mcap-filter

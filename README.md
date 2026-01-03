@@ -44,6 +44,37 @@ Testing docker locally
 ### k8s
 
 to scale from cli
+
 ```bash
 kubectl scale deployment data-archiver --replicas=128 -n foxglove
+```
+
+## Tar
+
+Dedupe
+
+```sql
+copy (
+with tmp as (
+    select
+      * exclude (_col5),
+      _col5::json as user_metadata,
+      row_number() over (partition by key order by record_timestamp desc) as rn
+    from './data/trip_clips.csv' qualify rn = 1
+  )
+
+  select * exclude (rn) from tmp
+) to './data/trip_clips.parquet';
+```
+
+```sql
+select
+  user_metadata->>'location__city' as city,
+  user_metadata->>'reference_id' as pilot_assignment_id,
+  user_metadata->>'vehicle__camera_version' as pilot_assignment_id,
+  key,
+  size,
+  user_metadata
+from './trip_clips_deduped.parquet'
+limit 10;
 ```

@@ -73,12 +73,29 @@ TAR BUILDER
 
 | s3://coco-trip-clips-976053906881-us-west-2/v2 | ----- [tar server ] -----> | s3://coco-trip-clips-976053906881-us-west-2/tar/|
 
-- [ ] get another 10k hours of data :/
 - [ ] design segmentation of trips (e.g. by hardware, city, pilots)
 - [ ] create segmentation of trips
 - [ ] bin pack into tar files
 - [ ] design shape of tar file (e.g. manifest? metadata? etc?)
 - [ ] create worker to pull down keys and package up into tar files
+
+
+
+- [ ] get another 10k hours of data :/
+
+# lets just do it by time
+
+1. Pre bucket into tar files according to month
+2. Fill sqs queue, where each message is tar file name + its contents
+3. Spin up another worker that will...
+   - download files
+   - fix the double schema problem
+   - make metadata file for openai
+   - make manifest file
+   - fix metadata (prob just include the messed up metadata or just wait on december)
+   - write into a tar file (perhaps we can do a single write here)
+4. upload to s3://coco-trip-clips-976053906881-us-west-2/tar/
+
 
 NOT ENOUGH DATA PROBLEM :(
 -----------
@@ -86,6 +103,21 @@ NOT ENOUGH DATA PROBLEM :(
 - started the restore around 1/2/26 at 3:30pm, so they probably won't be ready until 1/4/26 at 3:30pm
 - BUT even that probably won't be enough to get us to 100k. My guess is this will put us at around 95k
 - at this rate we'll need to send about half of janurary
+
+DOUBLE SCHEMA PROBLEM
+-------------
+- i messed up and included double schemas for `camera_info` and `tf_static. we can probably recover this
+
+made a cli to do this with:
+
+```bash
+./mcap-filter -in ../ba49bc89-0392-40a7-b10e-e39f04861c4b.mcap -out output.mcap \
+  -keep-channel /camera_back/camera_info:protobuf \
+  -keep-channel /camera_front/camera_info:protobuf \
+  -keep-channel /camera_left/camera_info:protobuf \
+  -keep-channel /camera_right/camera_info:protobuf \
+  -keep-channel /tf_static:protobuf
+```
 
 
 | cam   | gb/hour (avg) |

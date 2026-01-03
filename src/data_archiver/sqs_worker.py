@@ -392,7 +392,6 @@ def process_message(
     debug: bool,
 ) -> None:
     """Replace this with your real work."""
-    local_files = []
     s3 = build_s3_client()
     file_index = FileIndex([])
 
