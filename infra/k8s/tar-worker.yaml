@@ -29,7 +29,7 @@ spec:
         karpenter.sh/capacity-type: spot
       containers:
         - name: data-archiver
-          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver-tar-builder:927d6b2
+          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver-tar-builder:9f5b20e
           imagePullPolicy: IfNotPresent
           volumeMounts:
             - name: tmp
@@ -45,8 +45,8 @@ spec:
               memory: "1024Mi"
               ephemeral-storage: "200Gi"
             limits:
-              cpu: "2000m"
-              memory: "4096Mi"
+              cpu: "4000m"
+              memory: "7096Mi"
               ephemeral-storage: "256Gi"
       volumes:
         - name: tmp

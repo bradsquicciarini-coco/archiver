@@ -159,6 +159,7 @@ def process_message(s3, body: str, tmp_dir_base: Path):
     # 2) for each file:
     local_files = []
     success, failures = [], []
+    logger.info(f"Will download {len(keys)} files")
     for key in keys:
         # ... get metadata for object
         resp = s3.head_object(Bucket=bucket, Key=key)
@@ -168,15 +169,15 @@ def process_message(s3, body: str, tmp_dir_base: Path):
         reference_id = metadata["reference_id"]
         output_fp = tmp_dir / f"{reference_id}.mcap"
         if not output_fp.exists():
-            logger.info(f"Download s3://{bucket}/{key}")
+            logger.debug(f"Download s3://{bucket}/{key}")
             s3.download_file(bucket, key, output_fp)
         else:
-            logger.info(f"{output_fp} exists. Skipping...")
+            logger.debug(f"{output_fp} exists. Skipping...")
 
         # ... quality check
         ok, err = quality_check(output_fp)
         if not ok:
-            logger.error(f"{key} failed quality check: {err}. Will not include in tar.")
+            logger.warning(f"{key} failed quality check: {err}. Will not include in tar.")
             failures.append(reference_id)
             continue
         else:
@@ -190,7 +191,7 @@ def process_message(s3, body: str, tmp_dir_base: Path):
             logger.debug(f"Metadata after fix: {metadata}")
 
         # ... fix schema problem
-        logger.info(f"Fixing schema for {output_fp}")
+        logger.debug(f"Fixing schema for {output_fp}")
         fix_mcap(output_fp)
 
         # ... make metadata file for openai
@@ -219,10 +220,10 @@ def process_message(s3, body: str, tmp_dir_base: Path):
             writer.writerow([r, 0])
 
     # 5) upload to s3://coco-trip-clips-976053906881-us-west-2/tar/<name of tar file> (maybe put files inside in metdata)
-    logger.info("Uploading to manifest")
+    logger.info("Uploading manifest")
     s3.upload_file(manifest_fp, bucket, f"tar-manifest/{basename}.csv")
     output_key = f"tar/{tar_name}"
-    logger.info(f"Uploading to {output_key}")
+    logger.info(f"Uploading {output_key}")
     s3.upload_file(tarfile_fp, bucket, output_key)
 
     # 6) clean up
