@@ -131,6 +131,7 @@ def quality_check(filepath):
 
 
 def process_message(s3, body: str, tmp_dir_base: Path):
+    logger.info(f"received: {body}")
     payload = json.loads(body)
     tar_name = payload["name"]
     logger.info(f"Processing {tar_name}")
@@ -216,11 +217,11 @@ def process_message(s3, body: str, tmp_dir_base: Path):
 
 def main():
     parser = argparse.ArgumentParser(description="Minimal SQS consumer")
-    parser.add_argument("--queue-url", required=True, help="SQS queue URL")
+    parser.add_argument("--queue-url", default=os.getenv("QUEUE_URL"), help="SQS queue URL (or set QUEUE_URL)")
     parser.add_argument("--region", default="us-west-2", help="AWS region")
     parser.add_argument("--max-messages", type=int, default=1, help="Messages per poll (1-10)")
     parser.add_argument("--wait-time", type=int, default=10, help="Long poll wait time (seconds)")
-    parser.add_argument("--visibility-timeout", type=int, default=30, help="Visibility timeout (seconds)")
+    parser.add_argument("--visibility-timeout", type=int, default=3600, help="Visibility timeout (seconds)")
     parser.add_argument("--once", action="store_true", help="Poll once and exit")
     parser.add_argument("--test-msg", type=str)
     parser.add_argument("--debug", action="store_true")

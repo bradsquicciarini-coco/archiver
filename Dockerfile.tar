@@ -42,4 +42,4 @@ COPY --from=builder /app /app
 
 RUN uv sync --frozen --no-dev
 
-ENTRYPOINT ["uv", "run", "--no-sync", "--no-dev", "python", "-m", "data_archiver.sqs_worker"]
+ENTRYPOINT ["uv", "run", "--no-sync", "--no-dev", "python", "-m", "data_archiver.tar_worker"]

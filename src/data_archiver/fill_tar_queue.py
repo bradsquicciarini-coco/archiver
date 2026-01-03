@@ -1,7 +1,5 @@
 import argparse
 import json
-import os
-import boto3
 import duckdb
 from typing import List, Tuple
 import pandas as pd
@@ -79,17 +77,8 @@ def main():
     parser.add_argument("--input", type=str, help="input parqeut", required=True)
     parser.add_argument("--metadata-file", type=str, help="", required=True)
     parser.add_argument("--month", type=int, help="month to build", required=True)
+    parser.add_argument("--output", type=str, help="", required=True)
     args = parser.parse_args()
-
-    kwargs = dict(region_name=os.getenv("AWS_REGION", "us-west-2"))
-    if endpoint := os.getenv("SQS_ENDPOINT_URL"):
-        kwargs["endpoint_url"] = endpoint
-    sqs = boto3.client("sqs", **kwargs)
-
-    queue_name = os.getenv("QUEUE_NAME", "localstack-demo-queue")
-    create_resp = sqs.create_queue(QueueName=queue_name)
-    queue_url = create_resp["QueueUrl"]
-    print(f"{queue_url}")
 
     TARGET_SIZE_GB = 100
 
@@ -97,7 +86,7 @@ def main():
     df = load_data(args.input)
     sampled_df = df[df.month == args.month]
     groups, group_nums = pack_by_size(sampled_df[sampled_df.month == args.month], size_target=TARGET_SIZE_GB, size_col="size_gb")
-    print(group_nums)
+
     print("Printing first group...")
 
     # 3. load metadata
@@ -106,18 +95,18 @@ def main():
         metadata_fixes = load_metadata_fixes(args.metadata_file)
 
     # 2. build up sqs messages
-    for group_num in range(len(groups)):
-        tar_name = f"2025-{args.month:02d}-{group_num:08d}.tar"
-        keys = []
-        fixes = {}
-        for idx in groups[group_num]:
-            row = sampled_df.loc[idx]
-            keys.append(row.key)
-            if fix := metadata_fixes.get(row.key):
-                fixes[row.key] = fix
-        msg = dict(name=tar_name, keys=keys, fixes=fixes, bucket="coco-trip-clips-976053906881-us-west-2")
-        print(json.dumps(msg))
-        break
+    with open(args.output, "w") as f:
+        for group_num in range(len(groups)):
+            tar_name = f"2025-{args.month:02d}-{group_num:08d}.tar"
+            keys = []
+            fixes = {}
+            for idx in groups[group_num]:
+                row = sampled_df.loc[idx]
+                keys.append(row.key)
+                if fix := metadata_fixes.get(row.key):
+                    fixes[row.key] = fix
+            msg = dict(name=tar_name, keys=keys, fixes=fixes, bucket="coco-trip-clips-976053906881-us-west-2")
+            f.write(json.dumps(msg) + "\n")
 
 
 if __name__ == "__main__":
