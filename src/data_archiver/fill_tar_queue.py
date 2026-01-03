@@ -1,5 +1,7 @@
 import argparse
 import json
+import os
+import boto3
 import duckdb
 from typing import List, Tuple
 import pandas as pd
@@ -78,6 +80,16 @@ def main():
     parser.add_argument("--metadata-file", type=str, help="", required=True)
     parser.add_argument("--month", type=int, help="month to build", required=True)
     args = parser.parse_args()
+
+    kwargs = dict(region_name=os.getenv("AWS_REGION", "us-west-2"))
+    if endpoint := os.getenv("SQS_ENDPOINT_URL"):
+        kwargs["endpoint_url"] = endpoint
+    sqs = boto3.client("sqs", **kwargs)
+
+    queue_name = os.getenv("QUEUE_NAME", "localstack-demo-queue")
+    create_resp = sqs.create_queue(QueueName=queue_name)
+    queue_url = create_resp["QueueUrl"]
+    print(f"{queue_url}")
 
     TARGET_SIZE_GB = 100
 

@@ -23,6 +23,22 @@ class LevelJsonFormatter(json_log_formatter.JSONFormatter):
         return super().json_record(message, extra, record)
 
 
+def build_sqs_client():
+    return boto3.client(
+        "sqs",
+        region_name=os.getenv("AWS_REGION", "us-east-1"),
+        endpoint_url=os.getenv("SQS_ENDPOINT_URL"),
+    )
+
+
+def build_s3_client() -> boto3.client:
+    return boto3.client(
+        "s3",
+        region_name=os.getenv("AWS_REGION", "us-east-1"),
+        endpoint_url=os.getenv("S3_ENDPOINT_URL"),
+    )
+
+
 def logged_cmd(cmd: str, quiet: bool = False, check=True):
     logger.debug(cmd)
     subprocess.run(cmd, shell=True, check=check, stdout=subprocess.DEVNULL if quiet else None, stderr=subprocess.DEVNULL if quiet else None)
@@ -223,8 +239,8 @@ def main():
         logging.basicConfig(handlers=[handler])
         logger.setLevel(log_level)
 
-    s3 = boto3.client("s3", region_name=args.region)
-    sqs = boto3.client("sqs", region_name=args.region)
+    s3 = build_s3_client()
+    sqs = build_sqs_client()
 
     # tmp dir
     if args.debug:
@@ -261,7 +277,7 @@ def main():
             try:
                 body = msg["Body"]
                 receipt = msg["ReceiptHandle"]
-                process_message(body, tmp_dir_base=tmp_dir)
+                process_message(s3, body, tmp_dir_base=tmp_dir)
                 sqs.delete_message(QueueUrl=args.queue_url, ReceiptHandle=receipt)
             except Exception:
                 logger.exception("message processing failed; leaving in queue")
