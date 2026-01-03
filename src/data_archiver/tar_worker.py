@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import boto3
 from mcap.reader import make_reader
 import json_log_formatter
@@ -130,7 +131,17 @@ def quality_check(filepath):
     return True, None
 
 
+def cleanup(tmp_dir):
+    for file in os.listdir(tmp_dir):
+        fp = os.path.join(tmp_dir, file)
+        logger.debug(f"Removing {fp}")
+        os.remove(fp)
+    logger.debug(f"Removing {tmp_dir}")
+    os.rmdir(tmp_dir)
+
+
 def process_message(s3, body: str, tmp_dir_base: Path):
+    start_time = time.monotonic()
     logger.info(f"received: {body}")
     payload = json.loads(body)
     tar_name = payload["name"]
@@ -213,6 +224,11 @@ def process_message(s3, body: str, tmp_dir_base: Path):
     output_key = f"tar/{tar_name}"
     logger.info(f"Uploading to {output_key}")
     s3.upload_file(tarfile_fp, bucket, output_key)
+
+    # 6) clean up
+    cleanup(tmp_dir)
+    elapsed_s = time.monotonic() - start_time
+    logger.info(f"Completed {tar_name} in {elapsed_s:.2f}s")
 
 
 def main():

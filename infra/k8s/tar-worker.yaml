@@ -29,7 +29,7 @@ spec:
         karpenter.sh/capacity-type: spot
       containers:
         - name: data-archiver
-          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver-tar-builder:1194cfa
+          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver-tar-builder:927d6b2
           imagePullPolicy: IfNotPresent
           volumeMounts:
             - name: tmp
