@@ -92,9 +92,9 @@ def build_s3_client() -> boto3.client:
     )
 
 
-def logged_cmd(cmd: str, quiet: bool = False):
+def logged_cmd(cmd: str, quiet: bool = False, check=True):
     logger.debug(cmd)
-    subprocess.run(cmd, shell=True, check=True, stdout=subprocess.DEVNULL if quiet else None, stderr=subprocess.DEVNULL if quiet else None)
+    subprocess.run(cmd, shell=True, check=check, stdout=subprocess.DEVNULL if quiet else None, stderr=subprocess.DEVNULL if quiet else None)
 
 
 def get_mcap_timing(filepath: str):
@@ -105,6 +105,26 @@ def get_mcap_timing(filepath: str):
         end_s = int(summary.statistics.message_end_time / 1e9)
         duration_s = end_s - start_s
         return start_s, end_s, duration_s
+
+
+def recover_mcap(filepath: str):
+    logger.info(f"Recovering {filepath}")
+    recovered_fp = f"{filepath}.recover"
+    logged_cmd(f"mcap recover {filepath} -o {recovered_fp}", check=False)
+    shutil.move(recovered_fp, filepath)
+
+
+def ensure_video_mcaps_readable(video_files: list[str]):
+    for video_fp in video_files:
+        try:
+            get_mcap_timing(video_fp)
+        except Exception:
+            logger.warning("mcap timing failed; attempting recovery for %s", video_fp)
+            recover_mcap(video_fp)
+            try:
+                get_mcap_timing(video_fp)
+            except Exception as exc:
+                raise RuntimeError(f"mcap recover failed for {video_fp}") from exc
 
 
 def determine_gps_type(filepath: str):
@@ -396,13 +416,24 @@ def process_message(
             logger.info(f"s3://{output_bucket}/{output_key} exists will not process")
             return
 
-        # 0. find best overlap
-        interval, bag_files, video_files = find_best_overlap(payload["log_files"])
+        # 0. download video files and recover any bad mcaps before finding overlap
+        log_files = payload["log_files"]
+        video_keys = [f for f in log_files if f.endswith("_h264.mcap")]
+        video_local_files = download_logs(s3, video_keys, tmp_dir)
+        video_key_to_local = {key: str(tmp_dir / key.rsplit("/", 1)[-1]) for key in video_keys}
+        ensure_video_mcaps_readable(video_local_files)
+
+        # 1. find best overlap using mcap timing for videos
+        interval, bag_files, video_files = find_best_overlap(
+            log_files,
+            use_mcap_timing=True,
+            mcap_timing_func=get_mcap_timing,
+            mcap_timing_path_map=video_key_to_local,
+        )
         assert interval is not None, "No overlap in logs"
         if interval is None:
             NoValidDataError("No overlap b/t bags and videos")
 
-        files_to_download = bag_files + video_files
         valid_start_s = interval.start
         valid_end_s = interval.end
         assert valid_start_s < valid_end_s, "End time is below start time"
@@ -410,13 +441,15 @@ def process_message(
         overlap_s = int(valid_end_s - valid_start_s)
         logger.info(f"{overlap_s}s of overlap (lost {og_duration - overlap_s}s)")
 
-        # 1. download all logs for a given trip. if any fail we should fail the entire log
-        local_files = download_logs(s3, files_to_download, tmp_dir)
-        file_index.add(local_files)
+        # 2. download bag logs for a given trip. if any fail we should fail the entire log
+        local_bag_files = download_logs(s3, bag_files, tmp_dir)
+        file_index.add(local_bag_files)
+        video_local_overlap = [video_key_to_local[key] for key in video_files]
+        file_index.add(video_local_overlap)
 
-        # 2. convert any bags to mcap, unify them into one file, and then filter down to topics and time range we care about
+        # 3. convert any bags to mcap, unify them into one file, and then filter down to topics and time range we care about
         # ... convert
-        bag_files = [f for f in local_files if f.endswith(".bag")]
+        bag_files = [f for f in local_bag_files if f.endswith(".bag")]
         logger.info(f"Will convert {len(bag_files)} bag files")
         bag_to_mcap = convert_bags_to_mcaps(bag_files, keep_bags=keep)
         bag_mcap_files = bag_to_mcap.values()

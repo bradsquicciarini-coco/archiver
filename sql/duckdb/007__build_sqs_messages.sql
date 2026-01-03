@@ -20,9 +20,9 @@ routes as (
                 active_end := epoch(r.active_end)
             )
         ) as routes
-    from './data/20250101_20251130/assignments_and_logs.parquet' a
+    from './data/20251201_20251231/assignments_and_logs.parquet' a
     inner join
-        './data/20250101_20251130/routes.parquet' r
+        './data/20251201_20251231/routes.parquet' r
         on r.trip_id = a.external_metadata.trip_id
         and r.active_start < a.valid_end
         and a.valid_start < r.active_end
@@ -41,7 +41,7 @@ map_issues as (
                 notes := notes
             )
         ) as map_issues
-    from './data/20250101_20251130/map_issues.parquet'
+    from './data/20251201_20251231/map_issues.parquet'
     group by pilot_assignment_id
     )
 
@@ -59,10 +59,10 @@ select
     a.external_metadata,
     r.routes,
     i.map_issues
-from './data/20250101_20251130/assignments_and_logs.parquet' a
-left join './data/20250101_20251130/pilot_trips.parquet' p using (pilot_assignment_id)
+from './data/20251201_20251231/assignments_and_logs.parquet' a
+left join './data/20251201_20251231/pilot_trips.parquet' p using (pilot_assignment_id)
 left join routes r using (pilot_assignment_id)
 left join
     map_issues i using (pilot_assignment_id)
-) to './data/20250101_20251130/sqs_messages.parquet' 
+) to './data/20251201_20251231/sqs_messages.parquet' 
 ;

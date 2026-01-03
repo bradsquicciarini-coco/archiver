@@ -12,7 +12,7 @@ are associated with which trips.
 uv run scripts/make-inventory.py coco-gg-bags-prod --workers 16 --profile prod --out ./data/20251216-coco-gg-bags-prod-inventory
 
 # 2) parse out timestamps, log type, device etc from filename. This saves parsed object keys to logs.parquet
-duckdb :memory: < sql/duckdb/parse_log_filenames.sql
+ duckdb :memory: < sql/duckdb/001__parse_log_filenames.sql
 
 # 3) Check how much video data is available
 duckdb :memory: "
@@ -20,7 +20,7 @@ select
   sum(case when log_type = 'bag' then log_duration_min else 0 end) / 60 as bag_duration,
   sum(case when log_type = 'video' then log_duration_min else 0 end) / 60 as video_duration,
   video_duration / bag_duration as video_bag_ratio
-from './data/logs.parquet';
+from './data/20251201_20251231/logs.parquet';
 "
 ```
 
@@ -34,6 +34,7 @@ duckdb :memory: < sql/duckdb/004__aggregate_per_assignment.sql
 # check video data
 duckdb :memory: "
 select
+  city,
   sum(trip_length_seconds)
 from './data/20250101_20251130/pilot_trips.parquet'
 where trip_id in (

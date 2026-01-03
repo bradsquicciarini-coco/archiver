@@ -20,7 +20,7 @@ copy (
         when log_type == 'video' then 1
       end as log_duration_min,
       date_add(start_ts, log_duration_min * INTERVAL '1 minute') as end_ts
-    from './data/20251216-coco-gg-bags-prod-inventory/*.parquet'
+    from './data/20260101-coco-gg-bags-prod-inventory/*.parquet'
   )
 
   select
@@ -34,5 +34,5 @@ copy (
   where 
     start_ts is not null 
     and device_id is not null
-    and start_ts between '2025-01-01' and '2025-12-15'
-) to './data/logs.parquet';
+    and start_ts between '2025-12-01' and '2025-12-31'
+) to './data/20251201_20251231/logs.parquet';

@@ -80,6 +80,13 @@ TAR BUILDER
 - [ ] design shape of tar file (e.g. manifest? metadata? etc?)
 - [ ] create worker to pull down keys and package up into tar files
 
+NOT ENOUGH DATA PROBLEM :(
+-----------
+- we are putting objects into glacier after 14 days. so we are missing a large chunk of december
+- started the restore around 1/2/26 at 3:30pm, so they probably won't be ready until 1/4/26 at 3:30pm
+- BUT even that probably won't be enough to get us to 100k. My guess is this will put us at around 95k
+- at this rate we'll need to send about half of janurary
+
 
 | cam   | gb/hour (avg) |
 |-------|---------------|

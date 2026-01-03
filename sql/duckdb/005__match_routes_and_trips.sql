@@ -15,11 +15,11 @@ copy (
             active_end := r.active_end::timestamp, 
             id := r.internal_routing_id)
         ) as routes
-    from './data/20250101_20251130/assignments_and_logs.parquet' a
+    from './data/20251201_20251231/assignments_and_logs.parquet' a
     left join
-        './data/20250101_20251130/routes.parquet' r
+        './data/20251201_20251231/routes.parquet' r
         on r.trip_id = a.external_metadata.trip_id
         and r.active_start < a.valid_end
         and a.valid_start < r.active_end
     group by a.pilot_assignment_id
-) to './data/20250101_20251130/matched_assignments_and_routes.parquet' (format 'parquet');
+) to './data/20251201_20251231/matched_assignments_and_routes.parquet' (format 'parquet');

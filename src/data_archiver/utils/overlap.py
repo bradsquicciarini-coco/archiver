@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Iterable, Optional, Sequence
+from typing import Callable, Iterable, Mapping, Optional, Sequence
 import re
 
 _TS_RE = re.compile(r"(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})")
@@ -83,12 +83,24 @@ def find_best_overlap(
     bag_duration_s: float = 10 * 60,
     video_duration_s: float = 1 * 60,
     gap_tol_s: float = 5.0,
+    use_mcap_timing: bool = False,
+    mcap_timing_func: Callable[[str], tuple[float, float, float]] | None = None,
+    mcap_timing_path_map: Mapping[str, str] | None = None,
 ) -> tuple[Optional[Interval], list[str], list[str]]:
     bag_files = [f for f in files if f.endswith(".bag")]
     video_files = [f for f in files if f.endswith("_h264.mcap")]
 
     bag_items = intervals_from_files(bag_files, bag_duration_s)
-    video_items = intervals_from_files(video_files, video_duration_s)
+    if use_mcap_timing:
+        if mcap_timing_func is None:
+            raise ValueError("mcap_timing_func is required when use_mcap_timing=True")
+        video_items = []
+        for f in video_files:
+            timing_path = mcap_timing_path_map.get(f, f) if mcap_timing_path_map else f
+            start_s, end_s, _ = mcap_timing_func(timing_path)
+            video_items.append((f, Interval(start_s, end_s)))
+    else:
+        video_items = intervals_from_files(video_files, video_duration_s)
 
     best = largest_contiguous_overlap(
         [(iv.start, iv.end) for _, iv in bag_items],

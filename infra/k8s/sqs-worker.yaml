@@ -12,7 +12,7 @@ metadata:
   name: data-archiver
   namespace: foxglove
 spec:
-  replicas: 800 
+  replicas: 64
   selector:
     matchLabels:
       app: data-archiver
@@ -51,4 +51,4 @@ spec:
       volumes:
         - name: tmp
           emptyDir:
-            sizeLimit: 16Gi
+            sizeLimit: 32Gi

@@ -1,7 +1,7 @@
 copy (  
 with
-    source as (select * from read_parquet('./data/20250101_20251130/matched_trips_and_logs.parquet')),
-    metadata as (select * from read_parquet('./data/20250101_20251130/metadata.parquet')),
+    source as (select * from read_parquet('./data/20251201_20251231/matched_trips_and_logs.parquet')),
+    metadata as (select * from read_parquet('./data/20251201_20251231/metadata.parquet')),
     trip_stats as (
         select
             pilot_assignment_id,
@@ -70,5 +70,5 @@ select
     ) as external_metadata
 from aggregated as a
 join metadata as m using (pilot_assignment_id)
-where m.city not in ('Helsinki')
-    ) to './data/assignments_and_logs.parquet' (format 'parquet');
+-- where m.city not in ('Helsinki')
+    ) to './data/20251201_20251231/assignments_and_logs.parquet' (format 'parquet');
