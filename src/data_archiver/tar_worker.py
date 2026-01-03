@@ -208,6 +208,11 @@ def process_message(s3, body: str, tmp_dir_base: Path):
         for p in local_files:
             p = Path(p)
             tar.add(p, arcname=p.name)
+            metadata_fp = p.with_name(f"{p.name}.metadata.json")
+            tar.add(metadata_fp, arcname=metadata_fp.name)
+            # Remove local files to reduce disk usage after they are archived.
+            p.unlink(missing_ok=True)
+            metadata_fp.unlink(missing_ok=True)
 
     # 6) manifest
     manifest_fp = tmp_dir / f"{basename}.csv"
