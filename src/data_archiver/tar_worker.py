@@ -10,6 +10,7 @@ import tarfile
 import tempfile
 import time
 import boto3
+import botocore
 from mcap.reader import make_reader
 import json_log_formatter
 
@@ -131,6 +132,16 @@ def quality_check(filepath):
     return True, None
 
 
+def s3_key_exists(s3, bucket: str, key: str) -> bool:
+    try:
+        s3.head_object(Bucket=bucket, Key=key)
+        return True
+    except botocore.exceptions.ClientError as e:
+        if e.response["Error"]["Code"] == "404":
+            return False
+        raise
+
+
 def cleanup(tmp_dir):
     for file in os.listdir(tmp_dir):
         fp = os.path.join(tmp_dir, file)
@@ -151,6 +162,12 @@ def process_message(s3, body: str, tmp_dir_base: Path):
     bucket = payload["bucket"]
     keys = payload["keys"]
     fixes = payload["fixes"]
+    output_key = f"tar/{tar_name}"
+
+    exists = s3_key_exists(s3, bucket, output_key)
+    if exists:
+        logger.info(f"s3://{bucket}/{output_key} exists will not process")
+        return
 
     basename, _ = os.path.splitext(tar_name)
     tmp_dir = tmp_dir_base / str(basename)
@@ -227,7 +244,6 @@ def process_message(s3, body: str, tmp_dir_base: Path):
     # 5) upload to s3://coco-trip-clips-976053906881-us-west-2/tar/<name of tar file> (maybe put files inside in metdata)
     logger.info("Uploading manifest")
     s3.upload_file(manifest_fp, bucket, f"tar-manifest/{basename}.csv")
-    output_key = f"tar/{tar_name}"
     logger.info(f"Uploading {output_key}")
     s3.upload_file(tarfile_fp, bucket, output_key)
 
