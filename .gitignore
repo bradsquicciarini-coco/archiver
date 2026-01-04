@@ -12,5 +12,7 @@ wheels/
 data
 .tmp
 notebooks
-go/go.sum
-go/mcap-filter
+
+go.sum
+go/mcap-filter/mcap-filter-linux-arm
+go/tar-reader/tar-reader

@@ -259,7 +259,7 @@ def main():
     parser.add_argument("--region", default="us-west-2", help="AWS region")
     parser.add_argument("--max-messages", type=int, default=1, help="Messages per poll (1-10)")
     parser.add_argument("--wait-time", type=int, default=10, help="Long poll wait time (seconds)")
-    parser.add_argument("--visibility-timeout", type=int, default=3600, help="Visibility timeout (seconds)")
+    parser.add_argument("--visibility-timeout", type=int, default=7200, help="Visibility timeout (seconds)")
     parser.add_argument("--once", action="store_true", help="Poll once and exit")
     parser.add_argument("--test-msg", type=str)
     parser.add_argument("--debug", action="store_true")
