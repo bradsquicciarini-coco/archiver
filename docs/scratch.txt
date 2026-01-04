@@ -18,54 +18,17 @@ TODO
 - [x] don't clip Deployment trips
 - [x] handle retryable errors and non-retryable errors
 - [x] upload to s3
-      - [x] name based on assignment_id
-      - [x] add metadata and try and reuse the old trip-clips table
 - [x] check if key exists
 - [x] accept queue url from ENV
 - [x] enable faster shut down of the worker
 - [x] enable json logging that is compatible with datadog
 - [x] pick better servers that have more disk and allow better bin packing
-      - [x] understand disk usage (min/max/avg) by looking at datadog
-            - there are some big boys (e.g. 1000 trips that are longer than an hour). 1 hour of full video would require ~18GB
-            - so lets just set all the requests to 16GB, and limits to 32GB
-      - [x] select instance types that we can best fit on there
-      - [x] update karpenter
 - [x] deployment
-      - [x] dockerfile
-      - [x] infra to run it (spot instances)
-      - [x] queue
-            - [x] create queue
-            - [x] fill sqs queue
+
 - [ ] document infra (bucket policies etc)
 
 Later
 - [ ] how do we want to handle clips that are completely stationary (perhaps add metadata)
-
-
-METADATA
-----------
-
-| name                     | desc                                           | from                  |
-| ------------------------ | ---------------------------------------------- | --------------------- |
-| reference_id             | use pilot_assignment_id                        | m.pilot_assignment_id |
-| trip_id                  | use trip id                                    | m.trip_id             |
-| clip_start_utc           | use start from assignment                      | <FILE>                |
-| clip_end_utc             | use end from assignment                        | <FILE>                |
-| clip_avg_speed           | either compute from data or take from redshift | <FILE>                |
-| location.zone            |                                                | m.city                |
-| location.city            |                                                | m.city                |
-| location.country         |                                                | <HARDCODE>            |
-| location.local_timezone  |                                                | m.timezone            |
-| weather.weather_code     |                                                |                       |
-| weather.precipitation    |                                                | m.precipitation       |
-| weather.temperature_C    |                                                | m.temperature         |
-| weather.time_of_day      |                                                | m.tod                 |
-| weather.cloud_cover      |                                                | m.cloud_cover         |
-| vehicle.vehicle_id       |                                                | m.device_id           |
-| vehicle.vehicle_age_days | take from created at date                      | m.device_age_days     |
-| vehicle.vehicle_model    | 1 / 1.5                                        | <FILE>.               |
-| vehicle.camera_version   | 1 / 1.5-1 / 1.5-3                              | <FILE>                |
-| vehicle.gps_version      | 1 /2                                           | <FILE>                |
 
 
 TAR BUILDER
@@ -148,3 +111,23 @@ OTHER ITEMS
       - need to get that to fit on disk (remove side cameras and preprocess video)
 
 
+FIXING TAR
+-------------------
+
+- [x] go worker that will read from sqs queue (sqs queue message will be per tar file)
+- [x] stream in tar file uploading only mcap files 
+      - [x] (skip .metadata.json files)
+- [x] use metadata from local file
+- [x] using metadata we should build up key as year=<year>/month=<month>/day=<day>/<name>.mcap
+
+
+
+- network optimized server?
+
+
+
+
+- [ ] undo tarring
+      - [ ] download tar
+      - [ ] extract and put back in s3 under v3/ (make sure it has fixed metadata)
+      - [ ] can add metadata files from in memory
