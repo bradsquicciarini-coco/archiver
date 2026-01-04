@@ -35,7 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxslt1.1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY go/mcap-filter /usr/local/bin/mcap-filter
+COPY go/mcap-filter/mcap-filter-linux-arm /usr/local/bin/mcap-filter
 RUN chmod +x /usr/local/bin/mcap-filter
 
 COPY --from=builder /app /app

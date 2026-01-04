@@ -153,7 +153,7 @@ def cleanup(tmp_dir):
 
 def process_message(s3, body: str, tmp_dir_base: Path):
     start_time = time.monotonic()
-    logger.info(f"received: {body}")
+    logger.debug(f"received: {body}")
     payload = json.loads(body)
     tar_name = payload["name"]
     logger.info(f"Processing {tar_name}")
