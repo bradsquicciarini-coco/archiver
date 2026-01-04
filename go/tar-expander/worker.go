@@ -187,13 +187,14 @@ func expandTarReader(ctx context.Context, logger *zap.SugaredLogger, uploader *m
 }
 
 func filterMCAPByChannels(r io.Reader, w io.Writer) error {
-	keep := map[string]map[string]struct{}{
-		"/camera_back/camera_info":  {"protobuf": {}},
-		"/camera_left/camera_info":  {"protobuf": {}},
-		"/camera_right/camera_info": {"protobuf": {}},
-		"/camera_front/camera_info": {"protobuf": {}},
-		"/tf_static":                {"protobuf": {}},
+	dedupeTopics := map[string]struct{}{
+		"/camera_back/camera_info":  {},
+		"/camera_left/camera_info":  {},
+		"/camera_right/camera_info": {},
+		"/camera_front/camera_info": {},
+		"/tf_static":                {},
 	}
+	seenTopicEncoding := make(map[string]map[string]struct{})
 
 	writer, err := mcap.NewWriter(w, &mcap.WriterOptions{
 		Compression: mcap.CompressionNone,
@@ -248,13 +249,16 @@ func filterMCAPByChannels(r io.Reader, w io.Writer) error {
 			if err != nil {
 				return err
 			}
-			encodingSet, hasRule := keep[channel.Topic]
-			if !hasRule {
-				break
+			if _, ok := dedupeTopics[channel.Topic]; ok {
+				if _, ok := seenTopicEncoding[channel.Topic]; !ok {
+					seenTopicEncoding[channel.Topic] = make(map[string]struct{})
+				}
+				if _, ok := seenTopicEncoding[channel.Topic][channel.MessageEncoding]; ok {
+					break
+				}
+				seenTopicEncoding[channel.Topic][channel.MessageEncoding] = struct{}{}
 			}
-			if _, ok := encodingSet[channel.MessageEncoding]; ok {
-				channelsByID[channel.ID] = markableChannel{Channel: channel}
-			}
+			channelsByID[channel.ID] = markableChannel{Channel: channel}
 		case mcap.TokenMessage:
 			message, err := mcap.ParseMessage(data)
 			if err != nil {
