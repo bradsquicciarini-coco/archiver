@@ -137,4 +137,14 @@ made a cli to do this with:
 
 Q: Do we want to split into segments? honestly i think this will just make our lives harder
 
+OTHER ITEMS
+-------------
+- [ ] we need to track what we sent (can use manifest)
+- [ ] need to take about 6k hours from this
+      - best pilots
+      - all cities
+      - diverse weather
+      - this is about 6000hours x 8GB = 48,000 GB = 48 TB
+      - need to get that to fit on disk (remove side cameras and preprocess video)
+
 
