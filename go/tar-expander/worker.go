@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/foxglove/mcap/go/mcap"
 	"github.com/google/uuid"
 	_ "github.com/marcboeker/go-duckdb"
 	"go.uber.org/zap"
@@ -23,6 +25,16 @@ import (
 type queueMessage struct {
 	Bucket string `json:"bucket"`
 	Key    string `json:"key"`
+}
+
+type markableSchema struct {
+	*mcap.Schema
+	written bool
+}
+
+type markableChannel struct {
+	*mcap.Channel
+	written bool
 }
 
 func runQueueWorker(ctx context.Context, logger *zap.Logger, sqsClient *sqs.Client, s3Client *s3.Client, uploader *manager.Uploader, queueURL, outBucket, outPrefix, skipPattern string, metadataByID map[string]map[string]string, dryRun bool) error {
@@ -36,9 +48,11 @@ func runQueueWorker(ctx context.Context, logger *zap.Logger, sqsClient *sqs.Clie
 			return err
 		}
 		if len(out.Messages) == 0 {
+			logger.Info("no msgs")
 			continue
 		}
 		for _, msg := range out.Messages {
+			logger.Info("recieved message", zap.String("id", *msg.MessageId))
 			if msg.Body == nil {
 				continue
 			}
@@ -137,6 +151,7 @@ func expandTarReader(ctx context.Context, logger *zap.SugaredLogger, uploader *m
 		if shouldSkip(hdr.Name, skipPattern) {
 			continue
 		}
+		isMCAP := strings.HasSuffix(strings.ToLower(hdr.Name), ".mcap")
 		if dryRun {
 			logger.Infow("dryrun upload",
 				"bucket", outBucket,
@@ -144,6 +159,15 @@ func expandTarReader(ctx context.Context, logger *zap.SugaredLogger, uploader *m
 				"entry", hdr.Name,
 			)
 			continue
+		}
+		var body io.Reader = tr
+		if isMCAP {
+			pr, pw := io.Pipe()
+			go func() {
+				err := filterMCAPByChannels(tr, pw)
+				_ = pw.CloseWithError(err)
+			}()
+			body = pr
 		}
 		logger.Infow("uploading",
 			"bucket", outBucket,
@@ -153,11 +177,122 @@ func expandTarReader(ctx context.Context, logger *zap.SugaredLogger, uploader *m
 		_, err = uploader.Upload(ctx, &s3.PutObjectInput{
 			Bucket:   &outBucket,
 			Key:      &dstKey,
-			Body:     tr,
+			Body:     body,
 			Metadata: metadataForEntry(hdr.Name, metadataByID),
 		})
 		if err != nil {
 			return err
+		}
+	}
+}
+
+func filterMCAPByChannels(r io.Reader, w io.Writer) error {
+	keep := map[string]map[string]struct{}{
+		"/camera_back/camera_info":  {"protobuf": {}},
+		"/camera_left/camera_info":  {"protobuf": {}},
+		"/camera_right/camera_info": {"protobuf": {}},
+		"/camera_front/camera_info": {"protobuf": {}},
+		"/tf_static":                {"protobuf": {}},
+	}
+
+	writer, err := mcap.NewWriter(w, &mcap.WriterOptions{
+		Compression: mcap.CompressionNone,
+		Chunked:     true,
+		ChunkSize:   4 * 1024 * 1024,
+	})
+	if err != nil {
+		return err
+	}
+	defer writer.Close()
+
+	lexer, err := mcap.NewLexer(r, &mcap.LexerOptions{
+		ValidateChunkCRCs: true,
+	})
+	if err != nil {
+		return err
+	}
+
+	buf := make([]byte, 1024)
+	schemas := make(map[uint16]markableSchema)
+	channelsByID := make(map[uint16]markableChannel)
+
+	for {
+		token, data, err := lexer.Next(buf)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		if len(data) > len(buf) {
+			buf = data
+		}
+
+		switch token {
+		case mcap.TokenHeader:
+			header, err := mcap.ParseHeader(data)
+			if err != nil {
+				return err
+			}
+			if err := writer.WriteHeader(header); err != nil {
+				return err
+			}
+		case mcap.TokenSchema:
+			schema, err := mcap.ParseSchema(data)
+			if err != nil {
+				return err
+			}
+			schemas[schema.ID] = markableSchema{Schema: schema}
+		case mcap.TokenChannel:
+			channel, err := mcap.ParseChannel(data)
+			if err != nil {
+				return err
+			}
+			encodingSet, hasRule := keep[channel.Topic]
+			if !hasRule {
+				break
+			}
+			if _, ok := encodingSet[channel.MessageEncoding]; ok {
+				channelsByID[channel.ID] = markableChannel{Channel: channel}
+			}
+		case mcap.TokenMessage:
+			message, err := mcap.ParseMessage(data)
+			if err != nil {
+				return err
+			}
+			channel, ok := channelsByID[message.ChannelID]
+			if !ok {
+				continue
+			}
+			if !channel.written {
+				if channel.SchemaID != 0 {
+					schema, ok := schemas[channel.SchemaID]
+					if !ok {
+						return fmt.Errorf("encountered channel %q with unknown schema ID %d", channel.Topic, channel.SchemaID)
+					}
+					if !schema.written {
+						if err := writer.WriteSchema(schema.Schema); err != nil {
+							return err
+						}
+						schemas[channel.SchemaID] = markableSchema{Schema: schema.Schema, written: true}
+					}
+				}
+				if err := writer.WriteChannel(channel.Channel); err != nil {
+					return err
+				}
+				channelsByID[message.ChannelID] = markableChannel{Channel: channel.Channel, written: true}
+			}
+			if err := writer.WriteMessage(message); err != nil {
+				return err
+			}
+		case mcap.TokenDataEnd, mcap.TokenFooter:
+			return nil
+		case mcap.TokenChunk:
+			return errors.New("expected lexer to remove chunk records from input stream")
+		case mcap.TokenMetadata:
+			continue
+		case mcap.TokenError:
+			return errors.New("received error token but lexer did not return error on Next")
 		}
 	}
 }

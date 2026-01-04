@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: data-archiver-tar-fixer
+  namespace: foxglove
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::270582689972:role/data-archiver-role
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-archiver-tar-fixer
+  namespace: foxglove
+spec:
+  replicas: 256
+  selector:
+    matchLabels:
+      app: data-archiver-tar-fixer
+  template:
+    metadata:
+      labels:
+        app: data-archiver-tar-fixer
+        tags.datadoghq.com/service: data-archiver-tar-fixer
+        tags.datadoghq.com/env: dev
+    spec:
+      serviceAccountName: data-archiver-tar-fixer
+      nodeSelector:
+        disk: "instance-store"
+        karpenter.sh/capacity-type: on-demand
+      containers:
+        - name: data-archiver
+          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver-tar-fixer:157e791
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: AWS_REGION
+              value: us-west-2
+            - name: QUEUE_URL
+              value: //sqs.us-west-2.amazonaws.com/270582689972/data-archiver-tar-fixer
+            - name: LOG_LEVEL
+              value: info
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "1024Mi"
+            limits:
+              cpu: "4000m"
+              memory: "7096Mi"

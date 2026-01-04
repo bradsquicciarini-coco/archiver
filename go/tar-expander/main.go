@@ -5,7 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -14,6 +16,14 @@ import (
 )
 
 func main() {
+	defaultOutBucket := envOrDefault("OUT_BUCKET", "coco-trip-clips-976053906881-us-west-2")
+	defaultOutPrefix := envOrDefault("OUT_PREFIX", "v3")
+	defaultSkipPattern := envOrDefault("SKIP_PATTERN", "*.metadata.json")
+	defaultMetadataParquet := os.Getenv("METADATA_PARQUET")
+	defaultQueueURL := os.Getenv("QUEUE_URL")
+	defaultLocalTar := os.Getenv("LOCAL_TAR")
+	defaultDryRun := envBool("DRYRUN")
+
 	var outBucket string
 	var outPrefix string
 	var skipPattern string
@@ -22,14 +32,17 @@ func main() {
 	var localTar string
 	var dryRun bool
 
-	flag.StringVar(&outBucket, "out-bucket", "coco-trip-clips-976053906881-us-west-2", "destination S3 bucket (default: source bucket)")
-	flag.StringVar(&outPrefix, "out-prefix", "v3", "destination key prefix (default: none)")
-	flag.StringVar(&skipPattern, "skip-pattern", "*.metadata.json", "glob pattern to skip matching tar entries")
-	flag.StringVar(&metadataParquet, "metadata-parquet", "", "path to tar-metadata.parquet for S3 object metadata")
-	flag.StringVar(&queueURL, "queue-url", "", "SQS queue URL for work items")
-	flag.StringVar(&localTar, "local-tar", "", "path to local tar file to expand to S3")
-	flag.BoolVar(&dryRun, "dryrun", false, "log uploads without writing to S3")
+	flag.StringVar(&outBucket, "out-bucket", defaultOutBucket, "destination S3 bucket (default: source bucket)")
+	flag.StringVar(&outPrefix, "out-prefix", defaultOutPrefix, "destination key prefix (default: none)")
+	flag.StringVar(&skipPattern, "skip-pattern", defaultSkipPattern, "glob pattern to skip matching tar entries")
+	flag.StringVar(&metadataParquet, "metadata-parquet", defaultMetadataParquet, "path to tar-metadata.parquet for S3 object metadata")
+	flag.StringVar(&queueURL, "queue-url", defaultQueueURL, "SQS queue URL for work items")
+	flag.StringVar(&localTar, "local-tar", defaultLocalTar, "path to local tar file to expand to S3")
+	flag.BoolVar(&dryRun, "dryrun", defaultDryRun, "log uploads without writing to S3")
 	flag.Parse()
+
+	s3Endpoint := os.Getenv("S3_ENDPOINT_URL")
+	sqsEndpoint := os.Getenv("SQS_ENDPOINT_URL")
 
 	logger, err := zap.NewProduction()
 	if err != nil {
@@ -53,9 +66,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	client := s3.NewFromConfig(cfg)
+	client := s3.NewFromConfig(cfg, func(options *s3.Options) {
+		if s3Endpoint != "" {
+			options.BaseEndpoint = aws.String(s3Endpoint)
+			options.UsePathStyle = true
+		}
+	})
 	uploader := manager.NewUploader(client)
-	sqsClient := sqs.NewFromConfig(cfg)
+	sqsClient := sqs.NewFromConfig(cfg, func(options *sqs.Options) {
+		if sqsEndpoint != "" {
+			options.BaseEndpoint = aws.String(sqsEndpoint)
+		}
+	})
 
 	metadataByID, err := loadMetadata(ctx, metadataParquet)
 	if err != nil {
@@ -74,5 +96,25 @@ func main() {
 	if err := expandLocalTar(ctx, logger.Sugar(), uploader, localTar, outBucket, outPrefix, skipPattern, metadataByID, dryRun); err != nil {
 		logger.Error("expand failed", zap.Error(err))
 		os.Exit(1)
+	}
+}
+
+func envOrDefault(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func envBool(key string) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return false
+	}
+	switch strings.ToLower(value) {
+	case "1", "true", "t", "yes", "y":
+		return true
+	default:
+		return false
 	}
 }

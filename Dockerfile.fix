@@ -1,0 +1,25 @@
+FROM golang:1.24-bookworm AS builder
+
+WORKDIR /src
+
+COPY go/tar-expander/go.mod go/tar-expander/go.sum ./go/tar-expander/
+RUN cd go/tar-expander && go mod download
+
+COPY go/tar-expander ./go/tar-expander
+
+RUN cd go/tar-expander && go build -o /out/tar-expander .
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=builder /out/tar-expander /app/tar-expander
+COPY data/tar-metadata.parquet /app/data/tar-metadata.parquet
+
+ENV METADATA_PARQUET=/app/data/tar-metadata.parquet
+
+ENTRYPOINT ["/app/tar-expander"]

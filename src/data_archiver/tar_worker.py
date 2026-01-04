@@ -48,13 +48,13 @@ def logged_cmd(cmd: str, quiet: bool = False, check=True):
 
 def fix_mcap(filepath):
     channels = [
-        "/camera_back/camera_info:protobuf",
-        "/camera_left/camera_info:protobuf",
-        "/camera_right/camera_info:protobuf",
-        "/camera_front/camera_info:protobuf",
-        "/tf_static:protobuf",
+        "-keep-channel /camera_back/camera_info:protobuf",
+        "-keep-channel /camera_left/camera_info:protobuf",
+        "-keep-channel /camera_right/camera_info:protobuf",
+        "-keep-channel /camera_front/camera_info:protobuf",
+        "-keep-channel /tf_static:protobuf",
     ]
-    cmd = f"mcap-filter -in {filepath} -out {filepath}.fixed {' -keep-channel '.join(channels)}"
+    cmd = f"mcap-filter -in {filepath} -out {filepath}.fixed {' '.join(channels)}"
     logged_cmd(cmd)
     logged_cmd(f"mv {filepath}.fixed {filepath}")
 
@@ -259,7 +259,7 @@ def main():
     parser.add_argument("--region", default="us-west-2", help="AWS region")
     parser.add_argument("--max-messages", type=int, default=1, help="Messages per poll (1-10)")
     parser.add_argument("--wait-time", type=int, default=10, help="Long poll wait time (seconds)")
-    parser.add_argument("--visibility-timeout", type=int, default=7200, help="Visibility timeout (seconds)")
+    parser.add_argument("--visibility-timeout", type=int, default=3600, help="Visibility timeout (seconds)")
     parser.add_argument("--once", action="store_true", help="Poll once and exit")
     parser.add_argument("--test-msg", type=str)
     parser.add_argument("--debug", action="store_true")

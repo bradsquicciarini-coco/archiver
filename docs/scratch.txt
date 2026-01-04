@@ -119,7 +119,7 @@ FIXING TAR
       - [x] (skip .metadata.json files)
 - [x] use metadata from local file
 - [x] using metadata we should build up key as year=<year>/month=<month>/day=<day>/<name>.mcap
-
+- [ ] FUCK we still didn't fix the schemas
 
 
 - network optimized server?
