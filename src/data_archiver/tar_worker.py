@@ -83,11 +83,13 @@ def filter_mcap(filepath: Path) -> None:
 
 def zero_pad_date_segments(key: str) -> str:
     def _pad(match: re.Match) -> str:
-        label, value = match.groups()
-        return f"{label}={int(value):02d}"
+        label = match.group(1)
+        value = match.group(2)
+        suffix = match.group(3) or ""
+        return f"{label}={int(value):02d}{suffix}"
 
-    key = re.sub(r"(month)=(\d{1,2})(/|$)", lambda m: _pad(m) + (m.group(3) if m.group(3) else ""), key)
-    key = re.sub(r"(day)=(\d{1,2})(/|$)", lambda m: _pad(m) + (m.group(3) if m.group(3) else ""), key)
+    key = re.sub(r"(month)=(\d{1,2})(/|$)", _pad, key)
+    key = re.sub(r"(day)=(\d{1,2})(/|$)", _pad, key)
     return key
 
 

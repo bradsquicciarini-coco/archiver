@@ -29,7 +29,7 @@ spec:
         karpenter.sh/capacity-type: on-demand
       containers:
         - name: data-archiver
-          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver-tar-builder:bf39ee7
+          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver-tar-builder:3b71419
           imagePullPolicy: IfNotPresent
           volumeMounts:
             - name: tmp
@@ -41,8 +41,8 @@ spec:
               value: https://sqs.us-west-2.amazonaws.com/270582689972/data-archiver-tar-worker
             - name: LOG_LEVEL
               value: debug
-            - name: DISABLE_DESTRUCTIVE_ACTIONS
-              value: "1"
+            # - name: DISABLE_DESTRUCTIVE_ACTIONS
+            #   value: "1"
           resources:
             requests:
               cpu: "1000m"
