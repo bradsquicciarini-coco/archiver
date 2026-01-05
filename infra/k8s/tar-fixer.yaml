@@ -29,7 +29,7 @@ spec:
         karpenter.sh/capacity-type: on-demand
       containers:
         - name: data-archiver
-          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver-tar-fixer:56ed3b6
+          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver-tar-fixer:17c6eb7
           imagePullPolicy: IfNotPresent
           env:
             - name: AWS_REGION

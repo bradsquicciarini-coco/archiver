@@ -169,7 +169,7 @@ def process_message(s3, body: str, tmp_dir_base: Path, *, destructive: bool):
 
             output_key = key
             if output_key.startswith("v2/"):
-                output_key = output_key[len("v2/") :]
+                output_key = f'v3/{output_key[len("v2/") :]}'
 
             if not output_fp.exists():
                 logger.debug(f"Download s3://{bucket}/{key}")
@@ -197,6 +197,7 @@ def process_message(s3, body: str, tmp_dir_base: Path, *, destructive: bool):
                 extra_args["ServerSideEncryption"] = head["ServerSideEncryption"]
             if head.get("SSEKMSKeyId"):
                 extra_args["SSEKMSKeyId"] = head["SSEKMSKeyId"]
+            logger.info(f"Uploading to s3://{bucket}/{output_key}")
             s3.upload_file(output_fp, bucket, output_key, ExtraArgs=extra_args)
             if destructive:
                 s3.delete_object(Bucket=bucket, Key=key)
