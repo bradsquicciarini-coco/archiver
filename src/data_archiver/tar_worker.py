@@ -95,18 +95,14 @@ def zero_pad_date_segments(key: str) -> str:
 
 
 def move_to_bad_files(s3, bucket: str, key: str, *, destructive: bool) -> None:
-    if not destructive:
-        logger.info("Destructive S3 actions disabled; skipping move to bad files for %s", key)
-        return
-    bad_key = f"_bad_files/{key}"
-    logger.info(f"Moving s3://{bucket}/{key} -> s3://{bucket}/{bad_key}")
-    s3.copy_object(
-        Bucket=bucket,
-        Key=bad_key,
-        CopySource={"Bucket": bucket, "Key": key},
-        MetadataDirective="COPY",
-    )
-    s3.delete_object(Bucket=bucket, Key=key)
+    # if not destructive:
+    #     logger.info("Destructive S3 actions disabled; skipping move to bad files for %s", key)
+    #     return
+    # bad_key = f"_bad_files/{key}"
+    # logger.info(f"Moving s3://{bucket}/{key} -> s3://{bucket}/{bad_key}")
+    # s3.copy_object(Bucket=bucket, Key=bad_key, CopySource={"Bucket": bucket, "Key": key}, MetadataDirective="COPY")
+    # s3.delete_object(Bucket=bucket, Key=key)
+    pass
 
 
 def quality_check(filepath):
@@ -182,7 +178,16 @@ def process_message(s3, body: str, tmp_dir_base: Path, *, destructive: bool):
         output_fp = None
         reference_id = key
         try:
-            head = s3.head_object(Bucket=bucket, Key=key)
+
+            try:
+                head = s3.head_object(Bucket=bucket, Key=key)
+            except botocore.exceptions.ClientError as e:
+                code = e.response.get("Error", {}).get("Code")
+                if code in ("404", "NoSuchKey", "NotFound"):
+                    logger.warning("Input key missing; skipping: s3://%s/%s", bucket, key)
+                    failures.append(reference_id)
+                    continue
+                raise
             metadata = head.get("Metadata", {})
             reference_id = metadata.get("reference_id", key)
             normalized_metadata = normalize_metadata(metadata)

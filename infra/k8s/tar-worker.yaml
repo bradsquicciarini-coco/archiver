@@ -12,7 +12,7 @@ metadata:
   name: data-archiver-tar-builder
   namespace: foxglove
 spec:
-  replicas: 1
+  replicas: 512
   selector:
     matchLabels:
       app: data-archiver-tar-builder
@@ -26,10 +26,10 @@ spec:
       serviceAccountName: data-archiver-tar-builder
       nodeSelector:
         disk: "instance-store"
-        karpenter.sh/capacity-type: on-demand
+        karpenter.sh/capacity-type: spot
       containers:
         - name: data-archiver
-          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver-tar-builder:59b5cd1
+          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver-tar-builder:4fbdb1a
           imagePullPolicy: IfNotPresent
           volumeMounts:
             - name: tmp
@@ -40,7 +40,7 @@ spec:
             - name: QUEUE_URL
               value: https://sqs.us-west-2.amazonaws.com/270582689972/data-archiver-tar-worker
             - name: LOG_LEVEL
-              value: debug
+              value: info
             # - name: DISABLE_DESTRUCTIVE_ACTIONS
             #   value: "1"
           resources:
@@ -51,8 +51,8 @@ spec:
             limits:
               cpu: "4000m"
               memory: "7096Mi"
-              ephemeral-storage: "32Gi"
+              ephemeral-storage: "64Gi"
       volumes:
         - name: tmp
           emptyDir:
-            sizeLimit: 16Gi
+            sizeLimit: 64Gi
