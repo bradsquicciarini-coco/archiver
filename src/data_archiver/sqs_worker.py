@@ -72,8 +72,6 @@ TOPICS = [
     "/route/issue_report",
     "/route/geojson",
     "/tf_static",
-    # debug
-    "/debug/pts",
 ]
 
 
@@ -391,7 +389,7 @@ class WorkerConfig:
 def build_worker_config(payload: dict) -> WorkerConfig:
     output_bucket = "coco-trip-clips-976053906881-us-west-2"
     start_dt = datetime.fromtimestamp(int(payload["valid_start"]))
-    output_key_prefix = f"v2/year={start_dt.year}/month={start_dt.month}/day={start_dt.day}"
+    output_key_prefix = f"v3/year={start_dt.year}/month={start_dt.month}/day={start_dt.day}"
     output_key = f"{output_key_prefix}/{payload['pilot_assignment_id']}.mcap"
     return WorkerConfig(
         output_bucket=output_bucket,
@@ -623,7 +621,7 @@ def process_message(
         exists = s3_key_exists(s3, config.output_bucket, config.output_key)
         if exists:
             logger.info(f"s3://{config.output_bucket}/{config.output_key} exists will not process")
-            return
+            # return
 
         # 0. download logs and convert any bags to mcaps before finding overlap
         log_files = payload["log_files"]
@@ -679,6 +677,12 @@ def process_message(
         # Combine data into single mcap for the assignment
         # ... merge
         filtered_output_fp = merge_final_output(artifacts, tmp_dir, keep)
+        logger.info("Filtering final merged file")
+        final_filtered_output_fp = str(tmp_dir / "final_filtered.mcap")
+        mcap_filter(filtered_output_fp, final_filtered_output_fp, include=TOPICS, start_s=valid_start_s, end_s=valid_end_s)
+        if not keep:
+            remove_files([filtered_output_fp])
+        filtered_output_fp = final_filtered_output_fp
 
         # 5. infer additional metadata
         # ... check for existance of /point_one/pose
@@ -747,13 +751,7 @@ def poll_loop(queue_url: str, *, max_messages: int, wait_time: int, visibility_t
         for msg in messages:
             receipt = msg["ReceiptHandle"]
             try:
-                process_message(
-                    msg.get("Body", ""),
-                    msg.get("MessageAttributes", {}),
-                    tmp_dir,
-                    keep=keep,
-                    debug=debug,
-                )
+                process_message(msg.get("Body", ""), msg.get("MessageAttributes", {}), tmp_dir, keep=keep, debug=debug)
                 sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt)
             except Exception:
                 logger.exception("message processing failed; leaving in queue")
@@ -809,6 +807,8 @@ def main() -> int:
     else:
         tmp_dir = Path(tempfile.gettempdir())
     tmp_dir.mkdir(parents=True, exist_ok=True)
+    if args.debug:
+        TOPICS.append("/debug/pts")
     poll_loop(
         args.queue_url,
         max_messages=args.max_messages,
