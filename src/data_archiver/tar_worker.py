@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -78,6 +79,16 @@ def filter_mcap(filepath: Path) -> None:
     cmd = f"mcap filter {filepath} {include_str} -o {output_fp}"
     logged_cmd(cmd)
     logged_cmd(f"mv {output_fp} {filepath}")
+
+
+def zero_pad_date_segments(key: str) -> str:
+    def _pad(match: re.Match) -> str:
+        label, value = match.groups()
+        return f"{label}={int(value):02d}"
+
+    key = re.sub(r"(month)=(\d{1,2})(/|$)", lambda m: _pad(m) + (m.group(3) if m.group(3) else ""), key)
+    key = re.sub(r"(day)=(\d{1,2})(/|$)", lambda m: _pad(m) + (m.group(3) if m.group(3) else ""), key)
+    return key
 
 
 def move_to_bad_files(s3, bucket: str, key: str, *, destructive: bool) -> None:
@@ -170,6 +181,7 @@ def process_message(s3, body: str, tmp_dir_base: Path, *, destructive: bool):
             output_key = key
             if output_key.startswith("v2/"):
                 output_key = f'v3/{output_key[len("v2/") :]}'
+            output_key = zero_pad_date_segments(output_key)
 
             if not output_fp.exists():
                 logger.debug(f"Download s3://{bucket}/{key}")

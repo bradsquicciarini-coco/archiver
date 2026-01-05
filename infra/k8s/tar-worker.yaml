@@ -29,7 +29,7 @@ spec:
         karpenter.sh/capacity-type: on-demand
       containers:
         - name: data-archiver
-          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver-tar-builder:17c6eb7
+          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver-tar-builder:bf39ee7
           imagePullPolicy: IfNotPresent
           volumeMounts:
             - name: tmp
