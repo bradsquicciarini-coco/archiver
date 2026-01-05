@@ -93,7 +93,7 @@ func main() {
 		return
 	}
 
-	if err := expandLocalTar(ctx, logger.Sugar(), uploader, localTar, outBucket, outPrefix, skipPattern, metadataByID, dryRun); err != nil {
+	if err := expandLocalTar(ctx, logger.Sugar(), client, uploader, localTar, outBucket, outPrefix, skipPattern, metadataByID, dryRun); err != nil {
 		logger.Error("expand failed", zap.Error(err))
 		os.Exit(1)
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/smithy-go"
 	"github.com/foxglove/mcap/go/mcap"
 	"github.com/google/uuid"
 	_ "github.com/marcboeker/go-duckdb"
@@ -103,10 +104,10 @@ func expandTar(ctx context.Context, logger *zap.Logger, client *s3.Client, uploa
 	}
 	defer obj.Body.Close()
 
-	return expandTarReader(ctx, logger.Sugar(), uploader, obj.Body, outBucket, outPrefix, skipPattern, metadataByID, dryRun)
+	return expandTarReader(ctx, logger.Sugar(), client, uploader, obj.Body, outBucket, outPrefix, skipPattern, metadataByID, dryRun)
 }
 
-func expandLocalTar(ctx context.Context, logger *zap.SugaredLogger, uploader *manager.Uploader, tarPath, outBucket, outPrefix, skipPattern string, metadataByID map[string]map[string]string, dryRun bool) error {
+func expandLocalTar(ctx context.Context, logger *zap.SugaredLogger, client *s3.Client, uploader *manager.Uploader, tarPath, outBucket, outPrefix, skipPattern string, metadataByID map[string]map[string]string, dryRun bool) error {
 	if tarPath == "" {
 		return fmt.Errorf("local tar path is required")
 	}
@@ -122,10 +123,10 @@ func expandLocalTar(ctx context.Context, logger *zap.SugaredLogger, uploader *ma
 	}
 	defer f.Close()
 
-	return expandTarReader(ctx, logger, uploader, f, outBucket, outPrefix, skipPattern, metadataByID, dryRun)
+	return expandTarReader(ctx, logger, client, uploader, f, outBucket, outPrefix, skipPattern, metadataByID, dryRun)
 }
 
-func expandTarReader(ctx context.Context, logger *zap.SugaredLogger, uploader *manager.Uploader, r io.Reader, outBucket, outPrefix, skipPattern string, metadataByID map[string]map[string]string, dryRun bool) error {
+func expandTarReader(ctx context.Context, logger *zap.SugaredLogger, client *s3.Client, uploader *manager.Uploader, r io.Reader, outBucket, outPrefix, skipPattern string, metadataByID map[string]map[string]string, dryRun bool) error {
 	tr := tar.NewReader(r)
 	for {
 		hdr, err := tr.Next()
@@ -149,6 +150,18 @@ func expandTarReader(ctx context.Context, logger *zap.SugaredLogger, uploader *m
 			continue
 		}
 		if shouldSkip(hdr.Name, skipPattern) {
+			continue
+		}
+		exists, err := objectExists(ctx, client, outBucket, dstKey)
+		if err != nil {
+			return err
+		}
+		if exists {
+			logger.Infow("skipping existing object",
+				"bucket", outBucket,
+				"key", dstKey,
+				"entry", hdr.Name,
+			)
 			continue
 		}
 		isMCAP := strings.HasSuffix(strings.ToLower(hdr.Name), ".mcap")
@@ -184,6 +197,24 @@ func expandTarReader(ctx context.Context, logger *zap.SugaredLogger, uploader *m
 			return err
 		}
 	}
+}
+
+func objectExists(ctx context.Context, client *s3.Client, bucket, key string) (bool, error) {
+	_, err := client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: &bucket,
+		Key:    &key,
+	})
+	if err == nil {
+		return true, nil
+	}
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		code := apiErr.ErrorCode()
+		if code == "NotFound" || code == "404" {
+			return false, nil
+		}
+	}
+	return false, err
 }
 
 func filterMCAPByChannels(r io.Reader, w io.Writer) error {

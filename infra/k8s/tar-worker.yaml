@@ -29,7 +29,7 @@ spec:
         karpenter.sh/capacity-type: on-demand
       containers:
         - name: data-archiver
-          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver-tar-builder:9bc5136
+          image: 270582689972.dkr.ecr.us-west-2.amazonaws.com/data-archiver-tar-builder:59b5cd1
           imagePullPolicy: IfNotPresent
           volumeMounts:
             - name: tmp
@@ -47,12 +47,12 @@ spec:
             requests:
               cpu: "1000m"
               memory: "1024Mi"
-              ephemeral-storage: "32Gi"
+              ephemeral-storage: "16Gi"
             limits:
               cpu: "4000m"
               memory: "7096Mi"
-              ephemeral-storage: "128Gi"
+              ephemeral-storage: "32Gi"
       volumes:
         - name: tmp
           emptyDir:
-            sizeLimit: 128Gi
+            sizeLimit: 16Gi
