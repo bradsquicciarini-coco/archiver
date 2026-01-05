@@ -97,6 +97,13 @@ func main() {
 		logger.Error("expand failed", zap.Error(err))
 		os.Exit(1)
 	}
+	if !dryRun {
+		if err := os.Remove(localTar); err != nil {
+			logger.Error("failed to delete local tar", zap.Error(err), zap.String("path", localTar))
+			os.Exit(1)
+		}
+		logger.Info("deleted local tar", zap.String("path", localTar))
+	}
 }
 
 func envOrDefault(key, fallback string) string {

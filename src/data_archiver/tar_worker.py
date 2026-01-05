@@ -1,12 +1,10 @@
 import argparse
-import csv
 import json
 import logging
 import os
 from pathlib import Path
 import subprocess
 import sys
-import tarfile
 import tempfile
 import time
 import boto3
@@ -59,44 +57,51 @@ def fix_mcap(filepath):
     logged_cmd(f"mv {filepath}.fixed {filepath}")
 
 
-def make_openai_metadata_file(filepath, metadata):
+def normalize_metadata(metadata: dict) -> dict:
+    return {k: str(v) for k, v in metadata.items() if v is not None}
 
-    def prepare_metadata(metadata: dict) -> dict:
-        return {
-            "reference_id": metadata["reference_id"],
-            "version": int(metadata["__version"]),
-            "supplemental": {
-                "vehicle": {
-                    "vehicle_id": metadata["vehicle__vehicle_id"],
-                    "vehicle_model": metadata["vehicle__vehicle_model"],
-                    "vehicle_age_days": int(metadata["vehicle__vehicle_age_days"]),
-                    "gps_version": metadata["vehicle__gps_version"],
-                    "camera_version": metadata["vehicle__camera_version"],
-                },
-                "clip_avg_speed": float(metadata["clip_avg_speed"]),
-                "weather": {
-                    "weather_icon": metadata["weather__weather_icon"],
-                    "precipitation_mm": float(metadata["weather__precipitation_mm"]),
-                    "temperature_c": float(metadata["weather__temperature_c"]),
-                    "cloud_cover": float(metadata["weather__cloud_cover"]),
-                    "time_of_day": metadata["weather__time_of_day"],
-                },
-                "location": {
-                    "city": metadata["location__city"],
-                    "zone": metadata["location__zone"],
-                    "local_timezone": metadata["location__local_timezone"],
-                    "country": "USA",
-                },
-                "trip_id": metadata["trip_id"],
-                "clip_start_utc": metadata["clip_start_utc"],
-                "clip_end_utc": metadata["clip_end_utc"],
-            },
-        }
 
-    output_filepath = f"{filepath}.metadata.json"
-    external_metadata = prepare_metadata(metadata)
-    with open(output_filepath, "w") as f:
-        json.dump(external_metadata, f)
+def update_object_metadata(s3, bucket: str, key: str, metadata: dict, head: dict) -> None:
+    copy_args = {
+        "Bucket": bucket,
+        "Key": key,
+        "CopySource": {"Bucket": bucket, "Key": key},
+        "Metadata": metadata,
+        "MetadataDirective": "REPLACE",
+    }
+    for header in [
+        "ContentType",
+        "CacheControl",
+        "ContentDisposition",
+        "ContentEncoding",
+        "ContentLanguage",
+        "ServerSideEncryption",
+        "SSEKMSKeyId",
+        "StorageClass",
+    ]:
+        if head.get(header):
+            copy_args[header] = head[header]
+    s3.copy_object(**copy_args)
+
+
+def parse_clip_start(clip_start_utc: str):
+    from datetime import datetime
+
+    if clip_start_utc.endswith("Z"):
+        clip_start_utc = clip_start_utc[:-1] + "+00:00"
+    return datetime.fromisoformat(clip_start_utc)
+
+
+def move_to_bad_files(s3, bucket: str, key: str) -> None:
+    bad_key = f"_bad_files/{key}"
+    logger.info(f"Moving s3://{bucket}/{key} -> s3://{bucket}/{bad_key}")
+    s3.copy_object(
+        Bucket=bucket,
+        Key=bad_key,
+        CopySource={"Bucket": bucket, "Key": key},
+        MetadataDirective="COPY",
+    )
+    s3.delete_object(Bucket=bucket, Key=key)
 
 
 def quality_check(filepath):
@@ -162,90 +167,84 @@ def process_message(s3, body: str, tmp_dir_base: Path):
     bucket = payload["bucket"]
     keys = payload["keys"]
     fixes = payload["fixes"]
-    output_key = f"tar/{tar_name}"
-
-    exists = s3_key_exists(s3, bucket, output_key)
-    if exists:
-        logger.info(f"s3://{bucket}/{output_key} exists will not process")
-        return
-
     basename, _ = os.path.splitext(tar_name)
     tmp_dir = tmp_dir_base / str(basename)
     tmp_dir.mkdir(exist_ok=True)
 
     # 2) for each file:
-    local_files = []
     success, failures = [], []
     logger.info(f"Will download {len(keys)} files")
     for key in keys:
-        # ... get metadata for object
-        resp = s3.head_object(Bucket=bucket, Key=key)
-        metadata = resp.get("Metadata", {})
+        output_fp = None
+        reference_id = key
+        try:
+            # ... get metadata for object
+            head = s3.head_object(Bucket=bucket, Key=key)
+            metadata = head.get("Metadata", {})
+            reference_id = metadata.get("reference_id", key)
 
-        # ... download
-        reference_id = metadata["reference_id"]
-        output_fp = tmp_dir / f"{reference_id}.mcap"
-        if not output_fp.exists():
-            logger.debug(f"Download s3://{bucket}/{key}")
-            s3.download_file(bucket, key, output_fp)
-        else:
-            logger.debug(f"{output_fp} exists. Skipping...")
+            # ... download
+            output_name = os.path.basename(key)
+            output_fp = tmp_dir / output_name
 
-        # ... quality check
-        ok, err = quality_check(output_fp)
-        if not ok:
-            logger.warning(f"{key} failed quality check: {err}. Will not include in tar.")
-            failures.append(reference_id)
-            continue
-        else:
+            # ... and replace with correct data if None (can in include in sqs queue)
+            if fix := fixes.get(key):
+                logger.info(f"Applying metadata fix: {fix}")
+                logger.debug(f"Metadata before fix: {metadata}")
+                metadata.update(fix)
+                logger.debug(f"Metadata after fix: {metadata}")
+                normalized_metadata = normalize_metadata(metadata)
+                update_object_metadata(s3, bucket, key, normalized_metadata, head)
+            else:
+                normalized_metadata = normalize_metadata(metadata)
+
+            clip_start_utc = metadata["clip_start_utc"]
+            clip_start = parse_clip_start(clip_start_utc)
+
+            output_key = (
+                f"v3/year={clip_start.year}/month={clip_start.month}/day={clip_start.day}/{output_name}"
+            )
+            if s3_key_exists(s3, bucket, output_key):
+                logger.info(f"s3://{bucket}/{output_key} exists will not process")
+                continue
+
+            if not output_fp.exists():
+                logger.debug(f"Download s3://{bucket}/{key}")
+                s3.download_file(bucket, key, output_fp)
+            else:
+                logger.debug(f"{output_fp} exists. Skipping...")
+
+            # ... quality check
+            ok, err = quality_check(output_fp)
+            if not ok:
+                logger.warning(f"{key} failed quality check: {err}. Will not upload.")
+                failures.append(reference_id)
+                output_fp.unlink(missing_ok=True)
+                move_to_bad_files(s3, bucket, key)
+                continue
+
+            # ... fix schema problem
+            logger.debug(f"Fixing schema for {output_fp}")
+            fix_mcap(output_fp)
+
+            extra_args = {"Metadata": normalized_metadata}
+            if head.get("ContentType"):
+                extra_args["ContentType"] = head["ContentType"]
+            if head.get("ServerSideEncryption"):
+                extra_args["ServerSideEncryption"] = head["ServerSideEncryption"]
+            if head.get("SSEKMSKeyId"):
+                extra_args["SSEKMSKeyId"] = head["SSEKMSKeyId"]
+            s3.upload_file(output_fp, bucket, output_key, ExtraArgs=extra_args)
+            s3.delete_object(Bucket=bucket, Key=key)
             success.append(reference_id)
+        except Exception:
+            logger.exception(f"Failed to process {key}")
+            failures.append(reference_id)
+            if output_fp is not None:
+                output_fp.unlink(missing_ok=True)
+            move_to_bad_files(s3, bucket, key)
 
-        # ... and replace with correct data if None (can in include in sqs queue)
-        if fix := fixes.get(key):
-            logger.info(f"Applying metadata fix: {fix}")
-            logger.debug(f"Metadata before fix: {metadata}")
-            metadata.update(fix)
-            logger.debug(f"Metadata after fix: {metadata}")
-
-        # ... fix schema problem
-        logger.debug(f"Fixing schema for {output_fp}")
-        fix_mcap(output_fp)
-
-        # ... make metadata file for openai
-        make_openai_metadata_file(output_fp, metadata)
-
-        local_files.append(output_fp)
-
-    logger.info(f"Will add {len(local_files)} out of the {len(keys)} we started with.")
-
-    # 4) write out to a tar file
-    tarfile_fp = tmp_dir / tar_name
-    logger.info(f"Making tarfile {tarfile_fp}")
-    with tarfile.open(tarfile_fp, "w") as tar:
-        for p in local_files:
-            p = Path(p)
-            tar.add(p, arcname=p.name)
-            metadata_fp = p.with_name(f"{p.name}.metadata.json")
-            tar.add(metadata_fp, arcname=metadata_fp.name)
-            # Remove local files to reduce disk usage after they are archived.
-            p.unlink(missing_ok=True)
-            metadata_fp.unlink(missing_ok=True)
-
-    # 6) manifest
-    manifest_fp = tmp_dir / f"{basename}.csv"
-    with open(manifest_fp, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["pilot_assignment_id", "success"])
-        for r in success:
-            writer.writerow([r, 1])
-        for r in failures:
-            writer.writerow([r, 0])
-
-    # 5) upload to s3://coco-trip-clips-976053906881-us-west-2/tar/<name of tar file> (maybe put files inside in metdata)
-    logger.info("Uploading manifest")
-    s3.upload_file(manifest_fp, bucket, f"tar-manifest/{basename}.csv")
-    logger.info(f"Uploading {output_key}")
-    s3.upload_file(tarfile_fp, bucket, output_key)
+    logger.info(f"Uploaded {len(success)} out of the {len(keys)} we started with.")
 
     # 6) clean up
     cleanup(tmp_dir)

@@ -87,19 +87,24 @@ def find_best_overlap(
     mcap_timing_func: Callable[[str], tuple[float, float, float]] | None = None,
     mcap_timing_path_map: Mapping[str, str] | None = None,
 ) -> tuple[Optional[Interval], list[str], list[str]]:
-    bag_files = [f for f in files if f.endswith(".bag")]
+    bag_files = [f for f in files if f.endswith(".bag") or (f.endswith(".mcap") and not f.endswith("_h264.mcap"))]
     video_files = [f for f in files if f.endswith("_h264.mcap")]
 
-    bag_items = intervals_from_files(bag_files, bag_duration_s)
     if use_mcap_timing:
         if mcap_timing_func is None:
             raise ValueError("mcap_timing_func is required when use_mcap_timing=True")
+        bag_items = []
+        for f in bag_files:
+            timing_path = mcap_timing_path_map.get(f, f) if mcap_timing_path_map else f
+            start_s, end_s, _ = mcap_timing_func(timing_path)
+            bag_items.append((f, Interval(start_s, end_s)))
         video_items = []
         for f in video_files:
             timing_path = mcap_timing_path_map.get(f, f) if mcap_timing_path_map else f
             start_s, end_s, _ = mcap_timing_func(timing_path)
             video_items.append((f, Interval(start_s, end_s)))
     else:
+        bag_items = intervals_from_files(bag_files, bag_duration_s)
         video_items = intervals_from_files(video_files, video_duration_s)
 
     best = largest_contiguous_overlap(

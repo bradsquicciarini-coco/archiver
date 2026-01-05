@@ -122,12 +122,12 @@ FIXING TAR
 - [ ] FUCK we still didn't fix the schemas
 
 
-- network optimized server?
+PROCESSING DECEMBER
+-------------------
+just fix in initial worker
 
-
-
-
-- [ ] undo tarring
-      - [ ] download tar
-      - [ ] extract and put back in s3 under v3/ (make sure it has fixed metadata)
-      - [ ] can add metadata files from in memory
+- [ ] december metadata was wrong
+- [ ] directly output to s3://.../v3
+- [ ] fix the camera info schema + tf static
+- [x] add quality check and/or 
+      - [ ] just fix the underlying problem

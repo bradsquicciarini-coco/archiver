@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import argparse
 from contextvars import ContextVar
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import logging
@@ -97,6 +98,23 @@ def logged_cmd(cmd: str, quiet: bool = False, check=True):
     subprocess.run(cmd, shell=True, check=check, stdout=subprocess.DEVNULL if quiet else None, stderr=subprocess.DEVNULL if quiet else None)
 
 
+def mcap_merge(input_files, output_fp, keep=False):
+    cmd = f'mcap merge {" ".join([str(p) for p in input_files])} -o {output_fp}'
+    logged_cmd(cmd)
+    if not keep:
+        remove_files(input_files)
+
+
+def mcap_filter(input_fp: str, output_fp: str, *, include: list[str], start_s: int, end_s: int) -> None:
+    include_str = "".join([f' -y "{t}"   ' for t in include])
+    cmd = f"mcap filter {input_fp} {include_str} -s {int(start_s)} -e {int(end_s)} -o {output_fp}"
+    logged_cmd(cmd)
+
+
+def mcap_convert(input_fp: str, output_fp: str) -> None:
+    logged_cmd(f"mcap convert {input_fp} {output_fp}", quiet=True)
+
+
 def get_mcap_timing(filepath: str):
     with open(filepath, "rb") as f:
         reader = make_reader(f)
@@ -135,96 +153,63 @@ def determine_gps_type(filepath: str):
         return 2 if has_new_gps else 1
 
 
-def determine_camera_types(filepath: str):
+def _infer_camera_metadata(reader) -> tuple[str, str]:
+    has_new_front_cam = None
+    has_new_left_cam = None
+    has_new_right_cam = None
+    vehicle_model = "1"
+    camera_version = "1"
+
+    def is_new_cam(metadata):
+        for m in metadata:
+            if m.key == "codedWidth":
+                return int(m.value) == 1920
+        return False
+
+    for _, chan, _, dmsg in reader.iter_decoded_messages(topics=["robot.h264_video.front", "robot.h264_video.right", "robot.h264_video.left"]):
+        if not dmsg.keyframe:
+            continue
+        if chan.topic == "robot.h264_video.front" and has_new_front_cam is None:
+            has_new_front_cam = is_new_cam(dmsg.metadata)
+        elif chan.topic == "robot.h264_video.right" and has_new_right_cam is None:
+            has_new_right_cam = is_new_cam(dmsg.metadata)
+        elif chan.topic == "robot.h264_video.left" and has_new_left_cam is None:
+            has_new_left_cam = is_new_cam(dmsg.metadata)
+
+        checked_all = all([v is not None for v in [has_new_front_cam, has_new_right_cam, has_new_left_cam]])
+        if checked_all:
+            if any([has_new_front_cam, has_new_right_cam, has_new_left_cam]):
+                vehicle_model = "1.5"
+            if all([has_new_front_cam, has_new_right_cam, has_new_left_cam]):
+                camera_version = "1.5-3"
+            elif has_new_front_cam and (not has_new_right_cam and not has_new_left_cam):
+                camera_version = "1.5-1"
+            break
+
+    return vehicle_model, camera_version
+
+
+def determine_camera_types(filepath: str) -> dict[str, str]:
     with open(filepath, "rb") as f:
         reader = make_reader(f, decoder_factories=[Ros1DecoderFactory(), ProtobufDecoderFactory()])
-        has_new_front_cam = None
-        has_new_left_cam = None
-        has_new_right_cam = None
-        vehicle_model = "1"
-        camera_version = "1"
-
-        def is_new_cam(metadata):
-            for m in metadata:
-                if m.key == "codedWidth":
-                    return int(m.value) == 1920
-
-        for _, chan, _, dmsg in reader.iter_decoded_messages(topics=["robot.h264_video.front", "robot.h264_video.right", "robot.h264_video.left"]):
-            if not dmsg.keyframe:
-                continue
-            if chan.topic == "robot.h264_video.front" and has_new_front_cam is None:
-                has_new_front_cam = is_new_cam(dmsg.metadata)
-            elif chan.topic == "robot.h264_video.right" and has_new_right_cam is None:
-                has_new_right_cam = is_new_cam(dmsg.metadata)
-            elif chan.topic == "robot.h264_video.left" and has_new_left_cam is None:
-                has_new_left_cam = is_new_cam(dmsg.metadata)
-
-            checked_all = all([v is not None for v in [has_new_front_cam, has_new_right_cam, has_new_left_cam]])
-            if checked_all:
-                if any([has_new_front_cam, has_new_right_cam, has_new_left_cam]):
-                    vehicle_model = "1.5"
-                if all([has_new_front_cam, has_new_right_cam, has_new_left_cam]):
-                    camera_version = "1.5-3"
-                elif has_new_front_cam and (not has_new_right_cam and not has_new_left_cam):
-                    camera_version = "1.5-1"
-                break
-
+        vehicle_model, camera_version = _infer_camera_metadata(reader)
         return dict(
             vehicle_model=vehicle_model,
             camera_version=camera_version,
         )
 
 
-def infer_additional_vehicle_metadata(filepath: str):
-
+def infer_additional_vehicle_metadata(filepath: str) -> dict[str, str]:
     with open(filepath, "rb") as f:
         reader = make_reader(f, decoder_factories=[Ros1DecoderFactory(), ProtobufDecoderFactory()])
         summary = reader.get_summary()
         has_new_gps = "/point_one/pose" in [chan.topic for cid, chan in summary.channels.items()]
-        has_new_front_cam = None
-        has_new_left_cam = None
-        has_new_right_cam = None
-        vehicle_model = "1"
-        camera_version = "1"
-
-        def is_new_cam(metadata):
-            for m in metadata:
-                if m.key == "codedWidth":
-                    return int(m.value) == 1920
-
-        for _, chan, _, dmsg in reader.iter_decoded_messages(topics=["robot.h264_video.front", "robot.h264_video.right", "robot.h264_video.left"]):
-            if not dmsg.keyframe:
-                continue
-            if chan.topic == "robot.h264_video.front" and has_new_front_cam is None:
-                has_new_front_cam = is_new_cam(dmsg.metadata)
-            elif chan.topic == "robot.h264_video.right" and has_new_right_cam is None:
-                has_new_right_cam = is_new_cam(dmsg.metadata)
-            elif chan.topic == "robot.h264_video.left" and has_new_left_cam is None:
-                has_new_left_cam = is_new_cam(dmsg.metadata)
-
-            checked_all = all([v is not None for v in [has_new_front_cam, has_new_right_cam, has_new_left_cam]])
-            if checked_all:
-                if any([has_new_front_cam, has_new_right_cam, has_new_left_cam]):
-                    vehicle_model = "1.5"
-                if all([has_new_front_cam, has_new_right_cam, has_new_left_cam]):
-                    camera_version = "1.5-3"
-                elif has_new_front_cam and (not has_new_right_cam and not has_new_left_cam):
-                    camera_version = "1.5-1"
-                break
-
+        vehicle_model, camera_version = _infer_camera_metadata(reader)
         return dict(
             vehicle_model=vehicle_model,
             camera_version=camera_version,
             gps_version="2" if has_new_gps else "1",
         )
-
-
-# TODO(Brad): remove after merge
-def merge_mcaps(input_files, output_fp, keep=False):
-    cmd = f'mcap merge {" ".join([str(p) for p in input_files])} -o {output_fp}'
-    logged_cmd(cmd)
-    if not keep:
-        remove_files(input_files)
 
 
 def trim_video_files(video_files, valid_start_s, valid_end_s, tmp_dir, keep=False, chunk_duration_s=60.0):
@@ -246,8 +231,7 @@ def trim_video_files(video_files, valid_start_s, valid_end_s, tmp_dir, keep=Fals
             continue
 
         output_fp = str(tmp_dir / f"{Path(video_fp).stem}_trimmed.mcap")
-        cmd = f"mcap filter {video_fp} -s {int(trim_start_s)} -e {int(trim_end_s)} -o {output_fp}"
-        logged_cmd(cmd)
+        mcap_filter(video_fp, output_fp, include=[], start_s=trim_start_s, end_s=trim_end_s)
         trimmed_files.append(output_fp)
         if not keep:
             remove_files([video_fp])
@@ -302,7 +286,7 @@ def convert_bags_to_mcaps(files: list[str], keep_bags=False):
             continue
 
         # perform conversion using mcap binary
-        logged_cmd(f"mcap convert {input_fp} {output_fp}", quiet=True)
+        mcap_convert(input_fp, output_fp)
 
         # cleanup
         if not keep_bags:
@@ -313,27 +297,40 @@ def convert_bags_to_mcaps(files: list[str], keep_bags=False):
 
 
 @dataclass
-class FileIndex:
-    files: list[str]
-
-    def replace(self, old_files, new_files):
-        if isinstance(new_files, str):
-            new_files = [new_files]
-        if isinstance(old_files, str):
-            old_files = [old_files]
-
-        for old_file in old_files:
-            self.files.remove(old_file)
-        self.files += new_files
+class LogArtifacts:
+    tmp_dir: Path
+    keep: bool
+    files: list[str] = field(default_factory=list)
 
     def add(self, files):
-        if isinstance(files, list):
-            files = [str(f) for f in files]
-        if isinstance(files, str):
-            files = [files]
-        if isinstance(files, Path):
-            files = [str(files)]
-        self.files += files
+        self.files.extend(normalize_files(files))
+
+    def replace(self, old_files, new_files):
+        self.files = replace_files(self.files, old_files, new_files)
+
+    def cleanup(self):
+        if self.keep:
+            return
+        cleanup(self.tmp_dir)
+
+
+def normalize_files(files) -> list[str]:
+    if isinstance(files, (list, tuple, set)):
+        return [str(f) for f in files]
+    if isinstance(files, str):
+        return [files]
+    if isinstance(files, Path):
+        return [str(files)]
+    if isinstance(files, Iterable):
+        return [str(f) for f in files]
+    return []
+
+
+def replace_files(files: list[str], old_files, new_files) -> list[str]:
+    old_list = normalize_files(old_files)
+    new_list = normalize_files(new_files)
+    remaining = [f for f in files if f not in old_list]
+    return remaining + new_list
 
 
 def cleanup(tmp_dir):
@@ -384,6 +381,223 @@ def s3_key_exists(s3, bucket: str, key: str) -> bool:
         raise
 
 
+@dataclass(frozen=True)
+class WorkerConfig:
+    output_bucket: str
+    output_key_prefix: str
+    output_key: str
+
+
+def build_worker_config(payload: dict) -> WorkerConfig:
+    output_bucket = "coco-trip-clips-976053906881-us-west-2"
+    start_dt = datetime.fromtimestamp(int(payload["valid_start"]))
+    output_key_prefix = f"v2/year={start_dt.year}/month={start_dt.month}/day={start_dt.day}"
+    output_key = f"{output_key_prefix}/{payload['pilot_assignment_id']}.mcap"
+    return WorkerConfig(
+        output_bucket=output_bucket,
+        output_key_prefix=output_key_prefix,
+        output_key=output_key,
+    )
+
+
+def build_metadata(payload: dict, filtered_output_fp: str, aux_vehicle_metadata: dict) -> dict:
+    existing_metadata = payload.get("external_metadata")
+    existing_metadata["__version"] = 2
+    start_s, end_s, duration_s = get_mcap_timing(filtered_output_fp)
+    existing_metadata["clip_start_utc"] = datetime.fromtimestamp(start_s).isoformat() + "Z"
+    existing_metadata["clip_end_utc"] = datetime.fromtimestamp(end_s).isoformat() + "Z"
+    existing_metadata["clip_duration_seconds"] = duration_s
+    existing_metadata["vehicle"].update(aux_vehicle_metadata)
+    existing_metadata["clip_avg_speed"] = round(compute_avg_speed(filtered_output_fp), 2)
+    return existing_metadata
+
+
+def fetch_and_prepare_logs(
+    s3,
+    log_files: list[str],
+    tmp_dir: Path,
+    keep: bool,
+) -> list[str]:
+    local_files = download_logs(s3, log_files, tmp_dir)
+
+    # ... bags
+    bag_files = [f for f in local_files if f.endswith(".bag")]
+    if bag_files:
+        logger.info(f"Will convert {len(bag_files)} bag files")
+    bag_to_mcap = convert_bags_to_mcaps(bag_files, keep_bags=keep)
+    mcap_files = replace_files(local_files, bag_to_mcap.keys(), bag_to_mcap.values())
+
+    # ... mcaps
+    video_files = [f for f in mcap_files if f.endswith("_h264.mcap")]
+    ensure_video_mcaps_readable(video_files)
+    return mcap_files
+
+
+def build_unified_bag(bag_mcap_files: list[str], tmp_dir: Path, keep: bool, artifacts: LogArtifacts) -> str:
+    artifacts.add(bag_mcap_files)
+
+    # 1) merge them all into a single bag
+    logger.info(f"Merging {len(bag_mcap_files)} into a single one")
+    unified_bag_fp = str(tmp_dir / "unifed_bags.mcap")
+    mcap_merge(bag_mcap_files, unified_bag_fp, keep=keep)
+
+    # 2) filter for only topics we are about
+    logger.info("Filter bag file to remove unused topics")
+    unified_bag_filtered_fp = str(tmp_dir / "unifed_bags_filtered.mcap")
+    include = [t for t in TOPICS if "camera_info" not in t and "tf_static" not in t]
+    include_str = "".join([f' -y "{t}"   ' for t in include])
+    cmd = f"mcap filter {unified_bag_fp} {include_str} -o {unified_bag_filtered_fp}"
+    logged_cmd(cmd)
+    if not keep:
+        remove_files([unified_bag_fp])
+    artifacts.replace(bag_mcap_files, unified_bag_filtered_fp)
+    return unified_bag_filtered_fp
+
+
+def apply_trace_filters(
+    unified_bag_fp: str,
+    payload: dict,
+    valid_start_s: float,
+    valid_end_s: float,
+    tmp_dir: Path,
+    artifacts: LogArtifacts,
+    debug: bool,
+) -> tuple[float, float, Any, Any, Any]:
+    should_mask_origin = payload["trip_type"] in ("DELIVERY_TRIP", "RETURN_TRIP")
+    should_mask_dest = payload["trip_type"] in ("DELIVERY_TRIP", "RETURN_TRIP", "JITP_TRIP")
+    logger.info(f"Determing valid start/end by analyzing trace. {should_mask_origin=} {should_mask_dest=}")
+    origin_pt = wkb.loads(bytes.fromhex(payload["origin_point_hexwkb"])) if should_mask_origin else None
+    destination_pt = wkb.loads(bytes.fromhex(payload["destination_point_hexwkb"])) if should_mask_dest else None
+    geo_valid_start_s, geo_valid_end_s, trace_env = find_valid_start_end_from_trace(
+        unified_bag_fp,
+        origin_pt,
+        destination_pt,
+        start_ns=int(valid_start_s * 1e9),
+        end_ns=int(valid_end_s * 1e9),
+        frequency_hz=0.5,
+    )
+    if geo_valid_start_s is None:
+        raise NoValidDataError("no valid start found based on trace")
+    if geo_valid_end_s is None:
+        raise NoValidDataError("no valid end found based on trace")
+    if geo_valid_end_s < geo_valid_start_s:
+        raise NoValidDataError("route based filter has end before start. This means there is probably no valid point")
+    valid_start_s = max(geo_valid_start_s, valid_start_s)
+    valid_end_s = min(geo_valid_end_s, valid_end_s)
+    if valid_start_s > valid_end_s:
+        raise NoValidDataError("End time is below start time")
+
+    if debug:
+        geo_debug_fp = tmp_dir / "geo_debug.mcap"
+        write_out_geo_debug(geo_debug_fp, valid_start_s, origin_pt, destination_pt, trace_env)
+        artifacts.add(geo_debug_fp)
+
+    return valid_start_s, valid_end_s, trace_env, origin_pt, destination_pt
+
+
+def inject_enrichments(
+    payload: dict,
+    valid_start_s: float,
+    aux_vehicle_metadata: dict,
+    origin_pt: Any,
+    destination_pt: Any,
+    trace_env: Any,
+    tmp_dir: Path,
+    artifacts: LogArtifacts,
+) -> None:
+    map_issues = payload.get("map_issues")
+    map_issues = [] if map_issues is None else map_issues
+    logger.info(f"Adding {len(map_issues)} map issues to the log")
+    map_issue_output = tmp_dir / "map_issues.mcap"
+    write_out_map_issues(map_issue_output, map_issues)
+    artifacts.add(map_issue_output)
+
+    calib_output = tmp_dir / "calibration.mcap"
+    write_out_camera_calibration(calib_output, aux_vehicle_metadata["camera_version"], valid_start_s)
+    artifacts.add(calib_output)
+
+    route_output = tmp_dir / "routes.mcap"
+    logger.info(f"Adding {payload['routes']} to the log")
+    write_out_routes(route_output, payload["routes"], valid_start_s, origin_pt, destination_pt, envelope=trace_env)
+    artifacts.add(route_output)
+
+
+def build_non_video_file(
+    artifacts: LogArtifacts,
+    valid_start_s: float,
+    valid_end_s: float,
+    tmp_dir: Path,
+    keep: bool,
+) -> str:
+    non_video_files = [f for f in artifacts.files if not f.endswith("h264.mcap")]
+    logger.info("Building merged non-video file")
+    merged_non_video_fp = str(tmp_dir / "merged_non_video.mcap")
+    mcap_merge(non_video_files, merged_non_video_fp, keep=keep)
+
+    logger.info("Filtering merged non-video file")
+    filtered_non_video_fp = str(tmp_dir / "filtered_non_video.mcap")
+    mcap_filter(merged_non_video_fp, filtered_non_video_fp, include=TOPICS, start_s=valid_start_s, end_s=valid_end_s)
+    if not keep:
+        remove_files([merged_non_video_fp])
+    artifacts.replace(non_video_files, filtered_non_video_fp)
+    return filtered_non_video_fp
+
+
+def trim_and_replace_videos(
+    artifacts: LogArtifacts,
+    valid_start_s: float,
+    valid_end_s: float,
+    tmp_dir: Path,
+    keep: bool,
+) -> None:
+    video_files = [f for f in artifacts.files if f.endswith("h264.mcap")]
+    trimmed_video_files = trim_video_files(video_files, valid_start_s, valid_end_s, tmp_dir, keep=keep)
+    if video_files:
+        artifacts.replace(video_files, trimmed_video_files)
+    if video_files and not trimmed_video_files:
+        logger.warning("No video files intersected the valid range after trimming")
+
+
+def merge_final_output(artifacts: LogArtifacts, tmp_dir: Path, keep: bool) -> str:
+    logger.info("Building final merged file")
+    filtered_output_fp = str(tmp_dir / "final.mcap")
+    mcap_merge(artifacts.files, filtered_output_fp, keep=keep)
+    return filtered_output_fp
+
+
+def quality_check(filepath):
+    with open(filepath, "rb") as f:
+        reader = make_reader(f)
+        summary = reader.get_summary()
+
+        cam_cid = None
+        odom_cid = None
+        for cid, chan in summary.channels.items():
+            if chan.topic == "robot.h264_video.front":
+                cam_cid = cid
+            if chan.topic == "/odom":
+                odom_cid = cid
+
+        if cam_cid is None:
+            return False, "cam not present"
+
+        if odom_cid is None:
+            return False, "odom not present"
+
+        start_s = int(summary.statistics.message_start_time / 1e9)
+        end_s = int(summary.statistics.message_end_time / 1e9)
+        duration_s = end_s - start_s
+        cam_hz = summary.statistics.channel_message_counts[cam_cid] / duration_s
+        odom_hz = summary.statistics.channel_message_counts[odom_cid] / duration_s
+
+        if cam_hz < 18:
+            return False, f"cam below expected rate: {cam_hz}"
+
+        if odom_hz < 30:
+            return False, f"odom below expected rate: {odom_hz}"
+    return True, None
+
+
 def process_message(
     body: str,
     attributes: Dict[str, Any],
@@ -393,8 +607,6 @@ def process_message(
 ) -> None:
     """Replace this with your real work."""
     s3 = build_s3_client()
-    file_index = FileIndex([])
-
     payload = json.loads(body) if body.strip().startswith("{") else {"body": body}
     pilot_assignment_id = payload.get("pilot_assignment_id")
     trip_type = payload.get("trip_type")
@@ -405,180 +617,87 @@ def process_message(
         logger.info(f"processing {pilot_assignment_id=} {trip_type=} {attributes=}")
         tmp_dir = base_tmp_dir / pilot_assignment_id
         tmp_dir.mkdir(exist_ok=True)
+        artifacts = LogArtifacts(tmp_dir=tmp_dir, keep=keep)
 
-        output_bucket = "coco-trip-clips-976053906881-us-west-2"
-        start_dt = datetime.fromtimestamp(int(payload["valid_start"]))
-        output_key_prefix = f"v2/year={start_dt.year}/month={start_dt.month}/day={start_dt.day}"
-        output_key = f"{output_key_prefix}/{pilot_assignment_id}.mcap"
-        exists = s3_key_exists(s3, output_bucket, output_key)
+        config = build_worker_config(payload)
+        exists = s3_key_exists(s3, config.output_bucket, config.output_key)
         if exists:
-            logger.info(f"s3://{output_bucket}/{output_key} exists will not process")
+            logger.info(f"s3://{config.output_bucket}/{config.output_key} exists will not process")
             return
 
-        # 0. download video files and recover any bad mcaps before finding overlap
+        # 0. download logs and convert any bags to mcaps before finding overlap
         log_files = payload["log_files"]
-        video_keys = [f for f in log_files if f.endswith("_h264.mcap")]
-        video_local_files = download_logs(s3, video_keys, tmp_dir)
-        video_key_to_local = {key: str(tmp_dir / key.rsplit("/", 1)[-1]) for key in video_keys}
-        ensure_video_mcaps_readable(video_local_files)
+        mcap_files = fetch_and_prepare_logs(s3, log_files, tmp_dir, keep)
+        artifacts.add(mcap_files)
 
-        # 1. find best overlap using mcap timing for videos
-        interval, bag_files, video_files = find_best_overlap(
-            log_files,
-            use_mcap_timing=True,
-            mcap_timing_func=get_mcap_timing,
-            mcap_timing_path_map=video_key_to_local,
-        )
+        # 1. find best overlap using mcap timing for all files
+        interval, bag_files, video_files = find_best_overlap(mcap_files, use_mcap_timing=True, mcap_timing_func=get_mcap_timing)
         assert interval is not None, "No overlap in logs"
         if interval is None:
             NoValidDataError("No overlap b/t bags and videos")
 
-        valid_start_s = interval.start
-        valid_end_s = interval.end
+        valid_start_s, valid_end_s = interval.start, interval.end
         assert valid_start_s < valid_end_s, "End time is below start time"
         og_duration = int(payload["valid_end"]) - int(payload["valid_start"])
         overlap_s = int(valid_end_s - valid_start_s)
         logger.info(f"{overlap_s}s of overlap (lost {og_duration - overlap_s}s)")
 
-        # 2. download bag logs for a given trip. if any fail we should fail the entire log
-        local_bag_files = download_logs(s3, bag_files, tmp_dir)
-        file_index.add(local_bag_files)
-        video_local_overlap = [video_key_to_local[key] for key in video_files]
-        file_index.add(video_local_overlap)
+        # 2. Merge all bags into single one and filter out topics we don't want
+        unified_bag_fp = build_unified_bag(bag_files, tmp_dir, keep, artifacts)
 
         # 3. convert any bags to mcap, unify them into one file, and then filter down to topics and time range we care about
-        # ... convert
-        bag_files = [f for f in local_bag_files if f.endswith(".bag")]
-        logger.info(f"Will convert {len(bag_files)} bag files")
-        bag_to_mcap = convert_bags_to_mcaps(bag_files, keep_bags=keep)
-        bag_mcap_files = bag_to_mcap.values()
-        file_index.replace(bag_to_mcap.keys(), bag_to_mcap.values())
-
-        # ... merge them into single file
-        logger.info(f"Merging {len(bag_mcap_files)} into a single one")
-        unified_bag_fp = str(tmp_dir / "unifed_bags.mcap")
-        merge_mcaps(bag_mcap_files, unified_bag_fp, keep=keep)
-        file_index.replace(bag_mcap_files, unified_bag_fp)
-
-        # directory now looks like this
-        # <tmp>
-        #   unifed_bags.mcap
-        #   <prefix0>_h264.mcap
-        #   ...
-        #   <prefixN>_h264.mcap
-
         # 3) metadata computation
         # 3a)
         # We need to do some logic based on the gps trace. We want to:
         #   1) clip the log to START after we're X meters from start and END X meters before destination
         #   2) also compute an envelope to trim the route if we only have partial data for the trip
-        should_mask_origin = payload["trip_type"] in ("DELIVERY_TRIP", "RETURN_TRIP")
-        should_mask_dest = payload["trip_type"] in ("DELIVERY_TRIP", "RETURN_TRIP", "JITP_TRIP")
-        logger.info(f"Determing valid start/end by analyzing trace. {should_mask_origin=} {should_mask_dest=}")
-        origin_pt = wkb.loads(bytes.fromhex(payload["origin_point_hexwkb"])) if should_mask_origin else None
-        destination_pt = wkb.loads(bytes.fromhex(payload["destination_point_hexwkb"])) if should_mask_dest else None
-        geo_valid_start_s, geo_valid_end_s, trace_env = find_valid_start_end_from_trace(
+        valid_start_s, valid_end_s, trace_env, origin_pt, destination_pt = apply_trace_filters(
             unified_bag_fp,
-            origin_pt,
-            destination_pt,
-            start_ns=int(valid_start_s * 1e9),
-            end_ns=int(valid_end_s * 1e9),
-            frequency_hz=0.5,
+            payload,
+            valid_start_s,
+            valid_end_s,
+            tmp_dir,
+            artifacts,
+            debug,
         )
-        if geo_valid_start_s is None:
-            raise NoValidDataError("no valid start found based on trace")
-        if geo_valid_end_s is None:
-            raise NoValidDataError("no valid end found based on trace")
-        if geo_valid_end_s < geo_valid_start_s:
-            raise NoValidDataError("route based filter has end before start. This means there is probably no valid point")
-        valid_start_s = max(geo_valid_start_s, valid_start_s)
-        valid_end_s = min(geo_valid_end_s, valid_end_s)
-        if valid_start_s > valid_end_s:
-            raise NoValidDataError("End time is below start time")
-
-        if debug:
-            geo_debug_fp = tmp_dir / "geo_debug.mcap"
-            write_out_geo_debug(geo_debug_fp, valid_start_s, origin_pt, destination_pt, trace_env)
-            file_index.add(geo_debug_fp)
 
         # compute some additional metadata (will need for injecting calibration)
         aux_vehicle_metadata = {}
         gps_version = determine_gps_type(unified_bag_fp)
         aux_vehicle_metadata["gps_version"] = gps_version
-        video_files = [f for f in file_index.files if f.endswith("h264.mcap")]
-        assert len(video_files) > 0, f"no video files found:  {file_index.files}"
+        video_files = [f for f in artifacts.files if f.endswith("h264.mcap")]
+        assert len(video_files) > 0, f"no video files found:  {artifacts.files}"
         cam_metadata = determine_camera_types(video_files[0])
         aux_vehicle_metadata.update(cam_metadata)
         logger.info(f"Computed new metadata {aux_vehicle_metadata=}")
 
         # 4. inject any additional data (e.g. routes and map issues)
-        # ... map issues
-        map_issues = payload.get("map_issues")
-        map_issues = [] if map_issues is None else map_issues
-        logger.info(f"Adding {len(map_issues)} map issues to the log")
-        map_issue_output = tmp_dir / "map_issues.mcap"
-        write_out_map_issues(map_issue_output, map_issues)
-        file_index.add(map_issue_output)
-
-        # ... inject camera calibration (and tfs?)
-        calib_output = tmp_dir / "calibration.mcap"
-        write_out_camera_calibration(calib_output, aux_vehicle_metadata["camera_version"], valid_start_s)
-        file_index.add(calib_output)
-
-        # ... routes
-        route_output = tmp_dir / "routes.mcap"
-        logger.info(f"Adding {payload['routes']} to the log")
-        write_out_routes(route_output, payload["routes"], valid_start_s, origin_pt, destination_pt, envelope=trace_env)
-        file_index.add(route_output)
-
-        non_video_files = [f for f in file_index.files if not f.endswith("h264.mcap")]
-        logger.info("Building merged non-video file")
-        merged_non_video_fp = str(tmp_dir / "merged_non_video.mcap")
-        merge_mcaps(non_video_files, merged_non_video_fp, keep=keep)
-
-        logger.info("Filtering merged non-video file")
-        filtered_non_video_fp = str(tmp_dir / "filtered_non_video.mcap")
-        include_str = "".join([f' -y "{t}"   ' for t in TOPICS])
-        cmd = f"mcap filter {merged_non_video_fp} {include_str} -s {int(valid_start_s)} -e {int(valid_end_s)} -o {filtered_non_video_fp}"
-        logged_cmd(cmd)
-        if not keep:
-            remove_files([merged_non_video_fp])
-        file_index.replace(non_video_files, filtered_non_video_fp)
-
-        video_files = [f for f in file_index.files if f.endswith("h264.mcap")]
-        trimmed_video_files = trim_video_files(video_files, valid_start_s, valid_end_s, tmp_dir, keep=keep)
-        if video_files:
-            file_index.replace(video_files, trimmed_video_files)
-        if video_files and not trimmed_video_files:
-            logger.warning("No video files intersected the valid range after trimming")
+        inject_enrichments(payload, valid_start_s, aux_vehicle_metadata, origin_pt, destination_pt, trace_env, tmp_dir, artifacts)
+        build_non_video_file(artifacts, valid_start_s, valid_end_s, tmp_dir, keep)
+        trim_and_replace_videos(artifacts, valid_start_s, valid_end_s, tmp_dir, keep)
 
         # Combine data into single mcap for the assignment
         # ... merge
-        logger.info("Building final merged file")
-        filtered_output_fp = str(tmp_dir / "final.mcap")
-        merge_mcaps(file_index.files, filtered_output_fp, keep=keep)
+        filtered_output_fp = merge_final_output(artifacts, tmp_dir, keep)
 
         # 5. infer additional metadata
         # ... check for existance of /point_one/pose
         # ... check resolution of left/front/right cameras
-        existing_metadata = payload.get("external_metadata")
-        existing_metadata["__version"] = 2
-        start_s, end_s, duration_s = get_mcap_timing(filtered_output_fp)
-        existing_metadata["clip_start_utc"] = datetime.fromtimestamp(start_s).isoformat() + "Z"
-        existing_metadata["clip_end_utc"] = datetime.fromtimestamp(end_s).isoformat() + "Z"
-        existing_metadata["clip_duration_seconds"] = duration_s
-        existing_metadata["vehicle"].update(aux_vehicle_metadata)
-        existing_metadata["clip_avg_speed"] = round(compute_avg_speed(filtered_output_fp), 2)
+        existing_metadata = build_metadata(payload, filtered_output_fp, aux_vehicle_metadata)
         logger.info("parsed metadata=%s", json.dumps(existing_metadata))
 
         # 6. quality check
+        ok, error = quality_check(filtered_output_fp)
+        if not ok:
+            logger.warning(f"Failed quality check: {error}")
+            raise NoValidDataError(f"Failed quality check: {error}")
         # ... check that all topics are there
         # TODO(Brad): do this
 
         # 7. upload
         flattened_metadata = flatten(existing_metadata)
-        logger.info(f"Uploading to s3://{output_bucket}/{output_key} with metadata: {flattened_metadata}")
-        s3.upload_file(filtered_output_fp, output_bucket, output_key, ExtraArgs={"Metadata": flattened_metadata})
+        logger.info(f"Uploading to s3://{config.output_bucket}/{config.output_key} with metadata: {flattened_metadata}")
+        s3.upload_file(filtered_output_fp, config.output_bucket, config.output_key, ExtraArgs={"Metadata": flattened_metadata})
 
         # TODO(Brad): do this
         if debug:
@@ -589,14 +708,13 @@ def process_message(
         invalid_metadata = {"__version": "2", "error_code": "NO_VALID_DATA"}
         empty_fp = Path(f"{tmp_dir}/empty.mcap")
         empty_fp.touch()
-        s3.upload_file(empty_fp, output_bucket, output_key, ExtraArgs={"Metadata": invalid_metadata})
+        s3.upload_file(empty_fp, config.output_bucket, config.output_key, ExtraArgs={"Metadata": invalid_metadata})
         logger.info(f"Processed {pilot_assignment_id}")
     else:
         duration_s = time.monotonic() - start_time
         logger.info(f"Processed {pilot_assignment_id} in {duration_s:.2f}s")
     finally:
-        if not keep:
-            cleanup(tmp_dir)
+        artifacts.cleanup()
         pilot_assignment_id_ctx.reset(token)
 
 
