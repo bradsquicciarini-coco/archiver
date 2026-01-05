@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import boto3
+import botocore
 from mcap.reader import make_reader
 import json_log_formatter
 
@@ -141,6 +142,16 @@ def quality_check(filepath):
     return True, None
 
 
+def s3_key_exists(s3, bucket: str, key: str) -> bool:
+    try:
+        s3.head_object(Bucket=bucket, Key=key)
+        return True
+    except botocore.exceptions.ClientError as e:
+        if e.response["Error"]["Code"] == "404":
+            return False
+        return True
+
+
 def cleanup(tmp_dir):
     for file in os.listdir(tmp_dir):
         fp = os.path.join(tmp_dir, file)
@@ -184,6 +195,9 @@ def process_message(s3, body: str, tmp_dir_base: Path, *, destructive: bool):
             if output_key.startswith("v2/"):
                 output_key = f'v3/{output_key[len("v2/") :]}'
             output_key = zero_pad_date_segments(output_key)
+            if s3_key_exists(s3, bucket, output_key):
+                logger.info(f"s3://{bucket}/{output_key} exists will not process")
+                continue
 
             if not output_fp.exists():
                 logger.debug(f"Download s3://{bucket}/{key}")
