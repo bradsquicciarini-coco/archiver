@@ -35,6 +35,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxslt1.1 \
     && rm -rf /var/lib/apt/lists/*
 
+RUN wget https://github.com/foxglove/mcap/releases/download/releases%2Fmcap-cli%2Fv0.0.58/mcap-linux-arm64 -O mcap && \
+    chmod +x mcap && \
+    mv mcap /usr/local/bin/mcap
+
 COPY go/mcap-filter/mcap-filter-linux-arm /usr/local/bin/mcap-filter
 RUN chmod +x /usr/local/bin/mcap-filter
 

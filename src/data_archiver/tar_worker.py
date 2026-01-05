@@ -8,7 +8,6 @@ import sys
 import tempfile
 import time
 import boto3
-import botocore
 from mcap.reader import make_reader
 import json_log_formatter
 
@@ -44,55 +43,47 @@ def logged_cmd(cmd: str, quiet: bool = False, check=True):
     subprocess.run(cmd, shell=True, check=check, stdout=subprocess.DEVNULL if quiet else None, stderr=subprocess.DEVNULL if quiet else None)
 
 
-def fix_mcap(filepath):
-    channels = [
-        "-keep-channel /camera_back/camera_info:protobuf",
-        "-keep-channel /camera_left/camera_info:protobuf",
-        "-keep-channel /camera_right/camera_info:protobuf",
-        "-keep-channel /camera_front/camera_info:protobuf",
-        "-keep-channel /tf_static:protobuf",
-    ]
-    cmd = f"mcap-filter -in {filepath} -out {filepath}.fixed {' '.join(channels)}"
-    logged_cmd(cmd)
-    logged_cmd(f"mv {filepath}.fixed {filepath}")
-
-
 def normalize_metadata(metadata: dict) -> dict:
     return {k: str(v) for k, v in metadata.items() if v is not None}
 
 
-def update_object_metadata(s3, bucket: str, key: str, metadata: dict, head: dict) -> None:
-    copy_args = {
-        "Bucket": bucket,
-        "Key": key,
-        "CopySource": {"Bucket": bucket, "Key": key},
-        "Metadata": metadata,
-        "MetadataDirective": "REPLACE",
-    }
-    for header in [
-        "ContentType",
-        "CacheControl",
-        "ContentDisposition",
-        "ContentEncoding",
-        "ContentLanguage",
-        "ServerSideEncryption",
-        "SSEKMSKeyId",
-        "StorageClass",
-    ]:
-        if head.get(header):
-            copy_args[header] = head[header]
-    s3.copy_object(**copy_args)
+TOPICS = [
+    "robot.h264_video.back",
+    "robot.h264_video.front",
+    "robot.h264_video.left",
+    "robot.h264_video.right",
+    "/camera_back/camera_info",
+    "/camera_front/camera_info",
+    "/camera_left/camera_info",
+    "/camera_right/camera_info",
+    "/acu_driver/gps_nav_topic",
+    "/imu",
+    "/point_one/pose",
+    "/speed_fb",
+    "/odom",
+    "/joy/selected",
+    "/cmd_vel/joystick/raw",
+    "/cmd_vel",
+    "/object_detection/detections_2d",
+    "/object_detection/detections_3d",
+    "/route/issue_report",
+    "/route/geojson",
+    "/tf_static",
+]
 
 
-def parse_clip_start(clip_start_utc: str):
-    from datetime import datetime
+def filter_mcap(filepath: Path) -> None:
+    include_str = "".join([f' -y "{t}"   ' for t in TOPICS])
+    output_fp = f"{filepath}.filtered"
+    cmd = f"mcap filter {filepath} {include_str} -o {output_fp}"
+    logged_cmd(cmd)
+    logged_cmd(f"mv {output_fp} {filepath}")
 
-    if clip_start_utc.endswith("Z"):
-        clip_start_utc = clip_start_utc[:-1] + "+00:00"
-    return datetime.fromisoformat(clip_start_utc)
 
-
-def move_to_bad_files(s3, bucket: str, key: str) -> None:
+def move_to_bad_files(s3, bucket: str, key: str, *, destructive: bool) -> None:
+    if not destructive:
+        logger.info("Destructive S3 actions disabled; skipping move to bad files for %s", key)
+        return
     bad_key = f"_bad_files/{key}"
     logger.info(f"Moving s3://{bucket}/{key} -> s3://{bucket}/{bad_key}")
     s3.copy_object(
@@ -137,16 +128,6 @@ def quality_check(filepath):
     return True, None
 
 
-def s3_key_exists(s3, bucket: str, key: str) -> bool:
-    try:
-        s3.head_object(Bucket=bucket, Key=key)
-        return True
-    except botocore.exceptions.ClientError as e:
-        if e.response["Error"]["Code"] == "404":
-            return False
-        raise
-
-
 def cleanup(tmp_dir):
     for file in os.listdir(tmp_dir):
         fp = os.path.join(tmp_dir, file)
@@ -156,7 +137,7 @@ def cleanup(tmp_dir):
     os.rmdir(tmp_dir)
 
 
-def process_message(s3, body: str, tmp_dir_base: Path):
+def process_message(s3, body: str, tmp_dir_base: Path, *, destructive: bool):
     start_time = time.monotonic()
     logger.debug(f"received: {body}")
     payload = json.loads(body)
@@ -166,7 +147,6 @@ def process_message(s3, body: str, tmp_dir_base: Path):
     # 1) parse metadata from the sqs message
     bucket = payload["bucket"]
     keys = payload["keys"]
-    fixes = payload["fixes"]
     basename, _ = os.path.splitext(tar_name)
     tmp_dir = tmp_dir_base / str(basename)
     tmp_dir.mkdir(exist_ok=True)
@@ -178,35 +158,18 @@ def process_message(s3, body: str, tmp_dir_base: Path):
         output_fp = None
         reference_id = key
         try:
-            # ... get metadata for object
             head = s3.head_object(Bucket=bucket, Key=key)
             metadata = head.get("Metadata", {})
             reference_id = metadata.get("reference_id", key)
+            normalized_metadata = normalize_metadata(metadata)
 
             # ... download
             output_name = os.path.basename(key)
             output_fp = tmp_dir / output_name
 
-            # ... and replace with correct data if None (can in include in sqs queue)
-            if fix := fixes.get(key):
-                logger.info(f"Applying metadata fix: {fix}")
-                logger.debug(f"Metadata before fix: {metadata}")
-                metadata.update(fix)
-                logger.debug(f"Metadata after fix: {metadata}")
-                normalized_metadata = normalize_metadata(metadata)
-                update_object_metadata(s3, bucket, key, normalized_metadata, head)
-            else:
-                normalized_metadata = normalize_metadata(metadata)
-
-            clip_start_utc = metadata["clip_start_utc"]
-            clip_start = parse_clip_start(clip_start_utc)
-
-            output_key = (
-                f"v3/year={clip_start.year}/month={clip_start.month}/day={clip_start.day}/{output_name}"
-            )
-            if s3_key_exists(s3, bucket, output_key):
-                logger.info(f"s3://{bucket}/{output_key} exists will not process")
-                continue
+            output_key = key
+            if output_key.startswith("v2/"):
+                output_key = output_key[len("v2/") :]
 
             if not output_fp.exists():
                 logger.debug(f"Download s3://{bucket}/{key}")
@@ -220,12 +183,12 @@ def process_message(s3, body: str, tmp_dir_base: Path):
                 logger.warning(f"{key} failed quality check: {err}. Will not upload.")
                 failures.append(reference_id)
                 output_fp.unlink(missing_ok=True)
-                move_to_bad_files(s3, bucket, key)
+                move_to_bad_files(s3, bucket, key, destructive=destructive)
                 continue
 
-            # ... fix schema problem
-            logger.debug(f"Fixing schema for {output_fp}")
-            fix_mcap(output_fp)
+            # ... filter to standard topics
+            logger.debug(f"Filtering topics for {output_fp}")
+            filter_mcap(output_fp)
 
             extra_args = {"Metadata": normalized_metadata}
             if head.get("ContentType"):
@@ -235,14 +198,18 @@ def process_message(s3, body: str, tmp_dir_base: Path):
             if head.get("SSEKMSKeyId"):
                 extra_args["SSEKMSKeyId"] = head["SSEKMSKeyId"]
             s3.upload_file(output_fp, bucket, output_key, ExtraArgs=extra_args)
-            s3.delete_object(Bucket=bucket, Key=key)
+            if destructive:
+                s3.delete_object(Bucket=bucket, Key=key)
+            else:
+                logger.info("Destructive S3 actions disabled; skipping delete for %s", key)
+            output_fp.unlink(missing_ok=True)
             success.append(reference_id)
         except Exception:
             logger.exception(f"Failed to process {key}")
             failures.append(reference_id)
             if output_fp is not None:
                 output_fp.unlink(missing_ok=True)
-            move_to_bad_files(s3, bucket, key)
+            move_to_bad_files(s3, bucket, key, destructive=destructive)
 
     logger.info(f"Uploaded {len(success)} out of the {len(keys)} we started with.")
 
@@ -262,6 +229,11 @@ def main():
     parser.add_argument("--once", action="store_true", help="Poll once and exit")
     parser.add_argument("--test-msg", type=str)
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument(
+        "--no-destructive",
+        action="store_true",
+        help="Disable destructive actions like deletes and cleanup (or set DISABLE_DESTRUCTIVE_ACTIONS=1).",
+    )
     args = parser.parse_args()
 
     # logger
@@ -280,6 +252,8 @@ def main():
     s3 = build_s3_client()
     sqs = build_sqs_client()
 
+    destructive = not (args.no_destructive or os.getenv("DISABLE_DESTRUCTIVE_ACTIONS") in ("1", "true", "TRUE", "yes", "YES"))
+
     # tmp dir
     if args.debug:
         tmp_dir = Path(".tmp") / "tar_worker"
@@ -293,7 +267,7 @@ def main():
         logger.info(f"Loading test msg: {test_msg_fp}")
         with test_msg_fp.open() as r:
             msg = r.readline()
-            process_message(s3, msg, tmp_dir_base=tmp_dir)
+            process_message(s3, msg, tmp_dir_base=tmp_dir, destructive=destructive)
         sys.exit(0)
 
     # main loop
@@ -315,7 +289,7 @@ def main():
             try:
                 body = msg["Body"]
                 receipt = msg["ReceiptHandle"]
-                process_message(s3, body, tmp_dir_base=tmp_dir)
+                process_message(s3, body, tmp_dir_base=tmp_dir, destructive=destructive)
                 sqs.delete_message(QueueUrl=args.queue_url, ReceiptHandle=receipt)
             except Exception:
                 logger.exception("message processing failed; leaving in queue")

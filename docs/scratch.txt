@@ -127,7 +127,7 @@ PROCESSING DECEMBER
 just fix in initial worker
 
 - [ ] december metadata was wrong
-- [ ] directly output to s3://.../v3
+- [x] directly output to s3://.../v3
 - [x] fix the camera info schema + tf static
 - [x] add quality check and/or 
       - [ ] just fix the underlying problem
