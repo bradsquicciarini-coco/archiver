@@ -7,6 +7,70 @@ import (
 	"strings"
 )
 
+type inputMetadata struct {
+	Version             string `json:"__version"`
+	ClipAvgSpeed        string `json:"clip_avg_speed"`
+	ClipDurationSeconds string `json:"clip_duration_seconds"`
+	ClipEndUTC          string `json:"clip_end_utc"`
+	ClipStartUTC        string `json:"clip_start_utc"`
+	LocationCity        string `json:"location__city"`
+	LocationCountry     string `json:"location__country"`
+	LocationTimezone    string `json:"location__local_timezone"`
+	LocationZone        string `json:"location__zone"`
+	ReferenceID         string `json:"reference_id"`
+	TripID              string `json:"trip_id"`
+	VehicleCamera       string `json:"vehicle__camera_version"`
+	VehicleGPS          string `json:"vehicle__gps_version"`
+	VehicleAgeDays      string `json:"vehicle__vehicle_age_days"`
+	VehicleID           string `json:"vehicle__vehicle_id"`
+	VehicleModel        string `json:"vehicle__vehicle_model"`
+	WeatherCloudCover   string `json:"weather__cloud_cover"`
+	WeatherPrecipMM     string `json:"weather__precipitation_mm"`
+	WeatherTempC        string `json:"weather__temperature_c"`
+	WeatherTimeOfDay    string `json:"weather__time_of_day"`
+	WeatherIcon         string `json:"weather__weather_icon"`
+}
+
+type outputMetadata struct {
+	ReferenceID  string       `json:"reference_id"`
+	Version      int          `json:"version"`
+	Supplemental supplemental `json:"supplemental"`
+}
+
+type supplemental struct {
+	ClipAvgSpeed        float64  `json:"clip_avg_speed"`
+	ClipDurationSeconds int      `json:"clip_duration_seconds"`
+	ClipEndUTC          string   `json:"clip_end_utc"`
+	ClipStartUTC        string   `json:"clip_start_utc"`
+	TripID              string   `json:"trip_id"`
+	Location            location `json:"location"`
+	Vehicle             vehicle  `json:"vehicle"`
+	Weather             weather  `json:"weather"`
+}
+
+type location struct {
+	City          string `json:"city"`
+	Country       string `json:"country"`
+	LocalTimezone string `json:"local_timezone"`
+	Zone          string `json:"zone"`
+}
+
+type vehicle struct {
+	CameraVersion  string `json:"camera_version"`
+	GPSVersion     string `json:"gps_version"`
+	VehicleAgeDays int    `json:"vehicle_age_days"`
+	VehicleID      string `json:"vehicle_id"`
+	VehicleModel   string `json:"vehicle_model"`
+}
+
+type weather struct {
+	CloudCover      float64 `json:"cloud_cover"`
+	PrecipitationMM float64 `json:"precipitation_mm"`
+	TemperatureC    float64 `json:"temperature_c"`
+	TimeOfDay       string  `json:"time_of_day"`
+	WeatherIcon     string  `json:"weather_icon"`
+}
+
 func buildMetadataFromRaw(value any) (outputMetadata, error) {
 	normalized, err := normalizeJSONText(value)
 	if err != nil {
@@ -20,7 +84,6 @@ func buildMetadataFromRaw(value any) (outputMetadata, error) {
 
 	return meta, nil
 }
-
 
 func normalizeJSONText(value any) (string, error) {
 	switch v := value.(type) {
