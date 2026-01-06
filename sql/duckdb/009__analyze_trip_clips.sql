@@ -58,3 +58,8 @@ tmp as (
   user_metadata->>'weather__weather_icon'              AS weather_weather_icon
   from tmp
 ) to './data/trip_clips_v3_deduped.parquet';
+
+
+select t.*
+from './data/trip_clips_v3_deduped.parquet' t
+left join
