@@ -96,3 +96,39 @@ Backlog
 Sequential Backlog
 ---------
 - [ ] build up script to package up a single trip
+
+
+Shipping Data
+-------------
+We have 93,500 hours, which means we need 6,500 more
+
+```sql
+-- 94077 hours
+select sum((user_metadata->>'clip_duration_seconds')::int)/3600 as total_hours from './data/trip_clips_v3_deduped.parquet' where (user_metadata->>'clip_avg_speed')::float >= 0.01;
+
+-- 93500 hours
+select sum((user_metadata->>'clip_duration_seconds')::int)/3600 as total_hours from './data/trip_clips_v3_deduped.parquet' where (user_metadata->>'clip_avg_speed')::float >= 0.1;
+```
+
+- [ ] select all trips where we didn't move
+- [ ] create container in azure
+- [ ] we can initialize a copy for first 90k hours
+- [ ] pull metadata for what was copied and then make script to copy over metadata files
+
+
+AFTER
+- [ ] select data we want
+- [ ] copy over to autopilot bucket
+
+
+Flow
+
+! if we can keep only valid data in the bucket, we can just use the recursive azcopy command. so we'd need to delete data we don't wanna send
+prerequistes
+- delete data we don't want to keep
+
+transfer 
+- Create container
+- Run this on a server
+- Call `azcopy copy 'https://s3.amazonaws.com/$S3_BUCKET/*' "$AZ_CONTAINER?$AZ_SAS_TOKEN" --recursive --from-to S3Blob`
+- Make script to add the metadata
