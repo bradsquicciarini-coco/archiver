@@ -11,12 +11,20 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
-func runPipeline(parquetPath string, limit int, uploader *blobUploader) error {
+func runPipeline(parquetPath string, limit int, uploader *blobUploader, resumeFile string) error {
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
 		return fmt.Errorf("open duckdb: %w", err)
 	}
 	defer db.Close()
+
+	tracker, err := newProgressTracker(resumeFile)
+	if err != nil {
+		return fmt.Errorf("init resume tracker: %w", err)
+	}
+	if tracker != nil {
+		defer tracker.Close()
+	}
 
 	total, err := countRows(db, parquetPath, limit)
 	if err != nil {
@@ -48,7 +56,7 @@ func runPipeline(parquetPath string, limit int, uploader *blobUploader) error {
 
 	var pool *uploadPool
 	if uploader != nil {
-		pool = newUploadPool(uploader)
+		pool = newUploadPool(uploader, tracker)
 		defer pool.cancel()
 	}
 
@@ -73,6 +81,13 @@ func runPipeline(parquetPath string, limit int, uploader *blobUploader) error {
 		trimmedKey := strings.TrimPrefix(key, "v3/")
 		outputPath := fmt.Sprintf("%s.metadata.json", trimmedKey)
 
+		if tracker != nil && tracker.Has(outputPath) {
+			if bar != nil {
+				_ = bar.Add(1)
+			}
+			continue
+		}
+
 		if pool != nil {
 			payload, err := json.Marshal(out)
 			if err != nil {
@@ -84,6 +99,11 @@ func runPipeline(parquetPath string, limit int, uploader *blobUploader) error {
 		} else {
 			if err := encoder.Encode(out); err != nil {
 				return fmt.Errorf("write output: %w", err)
+			}
+			if tracker != nil {
+				if err := tracker.Mark(outputPath); err != nil {
+					return fmt.Errorf("record progress: %w", err)
+				}
 			}
 		}
 

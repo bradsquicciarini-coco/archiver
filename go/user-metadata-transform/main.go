@@ -15,6 +15,7 @@ func main() {
 		limit       int
 		sasURL      string
 		concurrency int
+		resumeFile  string
 	)
 
 	rootCmd := &cobra.Command{
@@ -51,13 +52,14 @@ func main() {
 				}
 			}
 
-			return runPipeline(parquetPath, limit, uploader)
+			return runPipeline(parquetPath, limit, uploader, resumeFile)
 		},
 	}
 
 	rootCmd.Flags().IntVar(&limit, "limit", 0, "limit number of rows read from parquet (0 means no limit)")
 	rootCmd.Flags().StringVar(&sasURL, "sas-url", "", "azure container SAS URL (or set AZURE_STORAGE_SAS_URL)")
 	rootCmd.Flags().IntVar(&concurrency, "concurrency", 8, "number of concurrent uploads")
+	rootCmd.Flags().StringVar(&resumeFile, "resume-file", "", "path to progress file to resume from")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

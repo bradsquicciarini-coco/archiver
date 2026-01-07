@@ -132,3 +132,52 @@ transfer
 - Run this on a server
 - Call `azcopy copy 'https://s3.amazonaws.com/$S3_BUCKET/*' "$AZ_CONTAINER?$AZ_SAS_TOKEN" --recursive --from-to S3Blob`
 - Make script to add the metadata
+
+CLEANUP
+---------------
+- [ ] delete files AFTER we save want we want
+- [ ] 
+
+
+SAVING DATA WE WANT
+-------------------
+
+We have a little over 15k (100TB) hours of tenured pilots. Lets move this to autpilot account and put it in flexible storage.
+
+
+```sql
+with tmp as (
+  select
+    key,
+    record_type,
+    record_timestamp,
+    user_metadata.reference_id::text,
+    user_metadata,
+    user_metadata.vehicle__camera_version::text as camera_version,
+    row_number() over (partition by key order by record_timestamp desc) as rn,
+  	sum(case when record_type = 'CREATE' then 1 when record_type = 'DELETE' then -1 else 0 end) over (partition by key order by record_timestamp asc ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW ) as record_status
+  from
+    dbt_stg.dbt_stg_metadata_s3_tables__s3metadata_coco_trip_clips_976053906881_us_west_2
+  where
+    key like 'v3%' qualify rn = 1 and record_status >0
+),
+
+tmp2 as (
+select
+  t.key,
+  t.user_metadata.clip_duration_seconds::int,
+  pt.pilot_id,
+  pt.pilot_name,
+  pt.pilot_location,
+  pt.trip_created_at,
+  date_diff('month', p.created_at, pt.trip_started_at) as pilot_age
+from tmp t 
+  join dbt_fct.fct_pilot_trips pt on t.reference_id = pt.pilot_assignment_id
+  join dbt_fct.fct_pilots p on p.id = pt.pilot_id
+where 
+  camera_version in ('1.5-1', '1.5-3')
+  and pilot_age >= 8 -- weeks
+)
+
+select sum(clip_duration_seconds)/3600 from tmp2;
+```

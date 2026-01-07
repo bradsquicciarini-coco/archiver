@@ -19,20 +19,22 @@ type uploadJob struct {
 }
 
 type uploadPool struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	jobs   chan uploadJob
-	errCh  chan error
-	wg     sync.WaitGroup
+	ctx     context.Context
+	cancel  context.CancelFunc
+	jobs    chan uploadJob
+	errCh   chan error
+	wg      sync.WaitGroup
+	tracker *progressTracker
 }
 
-func newUploadPool(u *blobUploader) *uploadPool {
+func newUploadPool(u *blobUploader, tracker *progressTracker) *uploadPool {
 	ctx, cancel := context.WithCancel(context.Background())
 	pool := &uploadPool{
-		ctx:    ctx,
-		cancel: cancel,
-		jobs:   make(chan uploadJob, u.concurrency*2),
-		errCh:  make(chan error, 1),
+		ctx:     ctx,
+		cancel:  cancel,
+		jobs:    make(chan uploadJob, u.concurrency*2),
+		errCh:   make(chan error, 1),
+		tracker: tracker,
 	}
 
 	for i := 0; i < u.concurrency; i++ {
@@ -47,6 +49,16 @@ func newUploadPool(u *blobUploader) *uploadPool {
 					default:
 					}
 					return
+				}
+				if pool.tracker != nil {
+					if err := pool.tracker.Mark(job.path); err != nil {
+						select {
+						case pool.errCh <- err:
+							cancel()
+						default:
+						}
+						return
+					}
 				}
 			}
 		}()
